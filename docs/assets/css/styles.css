@@ -412,6 +412,24 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   text-shadow: 0 0 34px rgba(255,255,255,0.35);
 }
 .counter__hint { font-size: 0.74rem; color: var(--text-3); margin-top: 0.2rem; min-height: 1.1em; }
+
+/* JAR / MRPACK split, shown under the headline counter */
+.counter__split {
+  display: flex; gap: 0.45rem; margin-top: 0.7rem; flex-wrap: wrap;
+}
+.counter__split[hidden] { display: none !important; }
+.counter__split-item {
+  display: inline-flex; align-items: baseline; gap: 0.4rem;
+  padding: 0.26rem 0.6rem; border-radius: 7px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.035);
+}
+.counter__split-k {
+  font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.14em; color: var(--text-4);
+}
+.counter__split-v {
+  font-family: var(--font-display); font-weight: 700; font-size: 0.82rem;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
 .hero__counter-rail { display: flex; flex-direction: column; gap: 10px; align-items: center; height: 78px; justify-content: center; }
 .rail-line { width: 1px; height: 34px; background: linear-gradient(180deg, transparent, rgba(255,255,255,0.5), transparent); }
 .rail-line--dim { height: 18px; opacity: 0.4; }

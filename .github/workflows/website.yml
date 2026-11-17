@@ -86,6 +86,11 @@ jobs:
         shell: bash
         run: node scripts/check-site.mjs
 
+      - name: Test the download counter
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: node --test scripts/test-counter.mjs
+
       - name: Run site integration tests
         if: steps.filter.outputs.changed == 'true'
         working-directory: azyron-website

@@ -106,11 +106,37 @@ Check all four:
 | Live statistics | Total Downloads · Latest Version · Available Files · Last Updated |
 | Sections | Home · Downloads · Features · Changelog · About · Support |
 
-### Two honest counters
+### The download counter: "Downloads Since Launch"
 
-1. **Downloads** — GitHub's own `download_count`, summed for the total. Source of truth.
-2. **Started here** — a real, local count of download clicks on this site (localStorage).
-   It starts at `—` and only ever grows from genuine clicks. Never seeded, never inflated.
+The headline number starts at **0** and counts only downloads that happened after
+the counter went live:
+
+```
+sinceLaunch = live GitHub download_count − baseline captured at launch
+```
+
+- The baseline is a snapshot of GitHub's historical counters stored in
+  [`docs/data/counter-baseline.json`](../docs/data/counter-baseline.json).
+  It is set **once**, at launch — never reset, so the number can't drift or go backwards.
+- Every increment is a **real download**: GitHub increments `download_count` when
+  somebody actually pulls the asset from its release storage, which is the same URL
+  the DOWNLOAD buttons hand to the browser. Nothing is random or hard-coded.
+- **JAR and MRPACK are counted separately**, each against its own baseline, and
+  shown under the headline figure.
+- The UI re-reads GitHub every 5 seconds. Clicking DOWNLOAD nudges *your own view*
+  by one immediately (so the click feels acknowledged), and the authoritative shared
+  value replaces it on the next tick. The local nudge never reaches other visitors.
+- Per-asset cards show **SINCE LAUNCH** and **ALL-TIME (GITHUB)** side by side, so
+  GitHub's lifetime figure is still visible without being presented as the counter.
+
+Why not increment a counter on click? GitHub Pages runs no server, and there is no
+write-only token that can be safely handed to a browser — any click-counter would be
+either per-browser or console-editable. Deriving the number from GitHub's own download
+log keeps it global, real and tamper-resistant.
+
+Tests: `node --test scripts/test-counter.mjs` (12 tests, run in CI) cover the zero start,
+independent JAR/MRPACK counting, the never-negative guarantee, and new assets published
+after launch.
 
 ---
 

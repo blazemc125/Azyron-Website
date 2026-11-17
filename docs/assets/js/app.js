@@ -12,10 +12,10 @@ import {
   api,
   getRelease,
   getReleaseHistory,
-  recordLocalDownload,
   getLocalDownloads,
   getDiagnostics,
 } from './github-data.js';
+import { loadBaseline, computeSinceLaunch } from './counter.js';
 
 // Allow ?owner=…&repo=…&tag=… so a fork can point the page at its own release.
 (() => {
@@ -28,6 +28,11 @@ import {
 
 const state = {
   release: null,
+  baseline: null,
+  sinceLaunch: null,
+  /** mirrors the counter to the browser tab title so backgrounded tabs cannot
+   *  hide a change; purely cosmetic */
+  pendingLocal: 0,
   lastUpdatedAt: null,
   pollTimer: null,
   failures: 0,
@@ -303,9 +308,18 @@ function applyRelease(release) {
   state.lastUpdatedAt = new Date();
 
   const versionLabel = `v${release.version || release.tag}`;
-  const local = getLocalDownloads();
-  release.analytics = { proxied: local.total, byAssetId: local.byAsset };
-  release.totals.proxied = local.total;
+
+  // "Downloads Since Launch" — the only download figure shown as a headline.
+  // Derived from GitHub's live counters minus the snapshot taken at launch,
+  // so it starts at 0 and only ever moves when a real download happens.
+  const since = computeSinceLaunch(release, state.baseline);
+  state.sinceLaunch = since;
+  release.sinceLaunch = since;
+  // per-asset "since launch" for the download cards
+  release.analytics = {
+    sinceByAsset: Object.fromEntries(since.perAsset.map((p) => [String(p.id), p.since])),
+  };
+  release.totals.sinceLaunch = since.total;
 
   // nav + footer + everywhere
   setText($('#navVersion'), versionLabel);
@@ -315,19 +329,30 @@ function applyRelease(release) {
   setText($('#heroLatestVersion'), versionLabel);
   setText($('#heroFileCount'), `${release.assets.length} ${release.assets.length === 1 ? 'file' : 'files'}`);
   setText($('#heroLastUpdated'), dateLabel(release.updatedAt || release.publishedAt));
-  setText($('#footerDownloads'), formatNumber(release.totals.downloads));
+  setText($('#footerDownloads'), formatNumber(since.total));
 
-  // totals
-  setText($('#totalDownloads'), formatNumber(release.totals.downloads), { pop: true });
+  // headline counter
+  setText($('#totalDownloads'), formatNumber(since.total), { pop: since.total !== state.lastTotal });
   const hint = $('#totalDownloadsHint');
   if (hint) {
-    const bits = [
-      `${release.assets.length} ${release.assets.length === 1 ? 'asset' : 'assets'}`,
-      release.totals.sizeLabel || formatBytes(release.totals.size),
-      release.totals.proxied > 0 ? `${formatNumber(release.totals.proxied)} started here` : 'counted by GitHub',
-    ];
-    hint.innerHTML = `<span>${escapeHtml(bits.join(' · '))}</span>`;
+    if (!since.hasBaseline) {
+      hint.innerHTML = '<span>Waiting for the launch baseline…</span>';
+    } else {
+      const bits = [
+        since.launchedAt ? `since ${dateLabel(since.launchedAt)}` : 'since launch',
+        'updated every 5s from GitHub',
+      ];
+      hint.innerHTML = `<span>${escapeHtml(bits.join(' · '))}</span>`;
+    }
   }
+
+  // JAR / MRPACK split
+  const split = $('#counterSplit');
+  const jarEl = $('#countJar');
+  const mrEl = $('#countMrpack');
+  if (split) split.hidden = !since.hasBaseline || since.total === 0;
+  if (jarEl) setText(jarEl, formatNumber(since.byKind.jar || 0));
+  if (mrEl) setText(mrEl, formatNumber(since.byKind.mrpack || 0));
 
   // hero + cta download meta
   const primary = pickPrimaryAsset(release.assets);
@@ -341,7 +366,7 @@ function applyRelease(release) {
   });
 
   // stats bar
-  setStatDownloads(release.totals.downloads);
+  setStatDownloads(since.total);
   const statVersion = $('[data-stat="version"]');
   if (statVersion) statVersion.textContent = versionLabel;
   const statFiles = $('[data-stat="files"]');
@@ -360,10 +385,7 @@ function applyRelease(release) {
     meta.innerHTML = [
       `<span><svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z"/></svg>${escapeHtml(release.tag)}</span>`,
       `<span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>${escapeHtml(dateLabel(release.publishedAt))}</span>`,
-      `<span><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>${formatNumber(release.totals.downloads)} downloads</span>`,
-      release.totals.proxied > 0
-        ? `<span><svg viewBox="0 0 24 24"><path d="M4 12h16M12 4v16"/></svg>${formatNumber(release.totals.proxied)} served here</span>`
-        : '',
+      `<span><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>${formatNumber(since.total)} since launch</span>`,
     ].join('');
   }
   const pageLink = $('#releasePageLink');
@@ -483,15 +505,15 @@ function renderAssets(release) {
       void dl.offsetWidth;
       dl.classList.add('pop');
     }
-    const served = card.querySelector('[data-field="served"]');
-    const proxied = release.analytics?.byAssetId?.[String(asset.id)] || 0;
-    if (served) served.textContent = proxied > 0 ? formatNumber(proxied) : '—';
+    const sinceCell = card.querySelector('[data-field="since"]');
+    const sinceValue = release.analytics?.sinceByAsset?.[String(asset.id)] || 0;
+    if (sinceCell) sinceCell.textContent = formatNumber(sinceValue);
   });
 }
 
 function assetCardHtml(asset) {
   const copy = assetCopy[asset.kind] || assetCopy.file;
-  const served = state.release?.analytics?.byAssetId?.[String(asset.id)] || 0;
+  const sinceValue = state.release?.analytics?.sinceByAsset?.[String(asset.id)] || 0;
   return `
   <article class="asset" data-asset-id="${asset.id}" data-download-url="${escapeHtml(asset.browserDownloadUrl)}">
     <div class="asset__top">
@@ -508,12 +530,12 @@ function assetCardHtml(asset) {
         <span class="asset__meta-v">${escapeHtml(asset.sizeLabel || formatBytes(asset.size))}</span>
       </div>
       <div class="asset__meta-item">
-        <span class="asset__meta-k">DOWNLOADS</span>
+        <span class="asset__meta-k">ALL-TIME (GITHUB)</span>
         <span class="asset__meta-v" data-field="downloads">${formatNumber(asset.downloads)}</span>
       </div>
       <div class="asset__meta-item">
-        <span class="asset__meta-k">SERVED HERE</span>
-        <span class="asset__meta-v" data-field="served">${served > 0 ? formatNumber(served) : '—'}</span>
+        <span class="asset__meta-k">SINCE LAUNCH</span>
+        <span class="asset__meta-v" data-field="since">${formatNumber(sinceValue)}</span>
       </div>
     </div>
     <div class="asset__progress" aria-hidden="true"><div class="asset__progress-bar"></div></div>
@@ -635,11 +657,11 @@ async function startDownload(asset, card) {
   const declared = String(asset.contentType || '').toLowerCase().split(';')[0].trim();
   const mirrorable = !declared || SAFE_MIRROR_TYPES.has(declared) || asset.kind === 'jar';
 
-  // Count the click immediately: this is a real download attempt started from
-  // this site, and it is logged separately from GitHub's own counter.
-  const localLog = recordLocalDownload(asset);
-  const cardServed = card?.querySelector('[data-field="served"]');
-  if (cardServed) cardServed.textContent = formatNumber(localLog.byAsset[String(asset.id)] || 1);
+  // Acknowledge the click straight away for THIS visitor. The shared counter is
+  // never touched here — it only ever moves when GitHub records the download,
+  // which the 5-second poll picks up. This local nudge just avoids the feeling
+  // that nothing happened while GitHub's counter catches up.
+  noteLocalClick(asset);
 
   // The browser starts saving the file straight away. If we can also read the
   // body we mirror the byte stream into the progress UI at the same time.
@@ -693,7 +715,7 @@ async function startDownload(asset, card) {
     $('#modalDone').hidden = false;
     if (card) card.classList.remove('is-downloading');
     toast(`${asset.name} — download started in your browser`, 'ok');
-    return localLog;
+    return true;
   };
 
   // If the mirrored read has not produced a byte in this window we stop trying
@@ -708,11 +730,11 @@ async function startDownload(asset, card) {
 
   if (!mirrorable) {
     useNativeDownload();
-    return localLog;
+    return;
   }
 
   try {
-    if (firstByteAt !== 0) return localLog;
+    if (firstByteAt !== 0) return;
     const response = await fetch(url, {
       signal: controller.signal,
       cache: 'no-store',
@@ -727,7 +749,7 @@ async function startDownload(asset, card) {
     if (type.includes('text/html')) throw new Error('GitHub returned a web page instead of the file');
     if (type && !SAFE_MIRROR_TYPES.has(type.split(';')[0].trim())) {
       useNativeDownload();
-      return localLog;
+      return true;
     }
 
     const length = Number(response.headers.get('content-length')) || total;
@@ -738,7 +760,7 @@ async function startDownload(asset, card) {
 
     if (!response.body || !response.body.getReader) {
       useNativeDownload();
-      return localLog;
+      return true;
     }
     reader = response.body.getReader();
 
@@ -771,7 +793,7 @@ async function startDownload(asset, card) {
       clearTimeout(firstByteTimer);
       if (!usingNative && state.activeDownload?.userCancelled !== true) {
         useNativeDownload();
-        return localLog;
+        return;
       }
       document.title = 'AZYRON CLIENT — Performance. Smoothness. Style.';
       $('#modalSub').textContent = 'Download cancelled.';
@@ -790,10 +812,10 @@ async function startDownload(asset, card) {
       error instanceof TypeError;
     if (!usingNative && transportLike) {
       useNativeDownload();
-      return localLog;
+      return true;
     }
     showDownloadError(asset, error, card);
-    return localLog;
+    return;
   }
 }
 
@@ -846,9 +868,46 @@ function showDownloadError(asset, error, card) {
   setText($('#progressSpeed'), '');
 }
 
+/* ------------------------------------------- optimistic per-click feedback */
+/**
+ * Bump the *local* view only: the headline counter, the JAR/MRPACK split and the
+ * card's "since launch" cell each gain one immediately, and the next live read
+ * from GitHub overwrites them with the authoritative value. Nothing is written
+ * to shared state, so another visitor never sees this.
+ */
+function noteLocalClick(asset) {
+  const since = state.sinceLaunch;
+  if (!since) return;
+  const kind = String(asset.name || '').toLowerCase().endsWith('.mrpack') ? 'mrpack' : 'jar';
+  state.localPending = Math.min(state.localPending + 1, 9);
+
+  const optimisticTotal = since.total + state.localPending;
+  const optimisticKind = (since.byKind[kind] || 0) + state.localPending;
+
+  const totalEl = $('#totalDownloads');
+  if (totalEl) {
+    totalEl.textContent = formatNumber(optimisticTotal);
+    totalEl.classList.remove('pop');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('pop');
+  }
+  const statNum = $('[data-stat="downloads"] .stat__num');
+  if (statNum) statNum.textContent = formatNumber(optimisticTotal);
+  const kindEl = kind === 'mrpack' ? $('#countMrpack') : $('#countJar');
+  if (kindEl) kindEl.textContent = formatNumber(optimisticKind);
+  const cardCell = $(`.asset[data-asset-id="${asset.id}"] [data-field="since"]`);
+  if (cardCell) cardCell.textContent = formatNumber(Number(cardCell.textContent.replace(/[^0-9]/g, '') || 0) + 1);
+
+  // GitHub usually records the download within seconds; re-read soon, then
+  // settle back to the normal 5-second cadence.
+  setTimeout(() => pollStats(true), 4000);
+  setTimeout(() => { state.localPending = 0; }, 20_000);
+}
+
 /* ------------------------------------------------------------------ polling */
 async function pollStats(force = false) {
   const release = await getRelease({ force });
+  if (release.ok && !release.stale) state.localPending = 0;
   state.failures = release.stale ? state.failures + 1 : 0;
   state.release = release;
   applyRelease(release);
@@ -1008,7 +1067,7 @@ function initMisc() {
   }, 30000);
 }
 
-function boot() {
+async function boot() {
   initNav();
   initReveal();
   initSpotlight();
@@ -1018,7 +1077,11 @@ function boot() {
   window.addEventListener('resize', () => { initMarquee(); });
   initMisc();
   initPolling();
-  pollStats();
+
+  // The launch snapshot must be known before the first render, otherwise the
+  // headline would briefly show GitHub's all-time figure.
+  state.baseline = await loadBaseline();
+  await pollStats();
   loadChangelog();
 }
 
