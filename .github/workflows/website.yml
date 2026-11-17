@@ -137,6 +137,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Stamp build version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.sha }}-$(date -u +%Y%m%dT%H%M%SZ)"
+          python3 - "$VERSION" <<'PY'
+          import json, pathlib, re, sys
+          version = sys.argv[1]
+          root = pathlib.Path('docs')
+
+          # 1. machine-readable version, polled by the page
+          (root / 'version.json').write_text(json.dumps({
+              'version': version,
+              'builtAt': version.split('-', 1)[1],
+          }, indent=2) + "\n")
+
+          # 2. the same version on <html> so the JS can compare
+          html_path = root / 'index.html'
+          html = html_path.read_text()
+          html = re.sub(r'data-app-version="[^"]*"', f'data-app-version="{version}"', html, count=1)
+          html_path.write_text(html)
+
+          # 3. fingerprint the static asset URLs so a cached CSS/JS file can
+          #    never pair with a newer HTML document
+          short = version.split('-')[0][:8]
+          css = f'assets/css/styles.css?v={short}'
+          js = f'assets/js/app.js?v={short}'
+          html = html_path.read_text()
+          html = re.sub(r'assets/css/styles\.css(\?v=[^"]*)?', css, html)
+          html = re.sub(r'assets/js/app\.js(\?v=[^"]*)?', js, html)
+          html_path.write_text(html)
+
+          not_found = root / '404.html'
+          if not_found.exists():
+              text = not_found.read_text()
+              text = re.sub(r'assets/css/styles\.css(\?v=[^"]*)?', css, text)
+              not_found.write_text(text)
+          print(f'stamped {version}')
+          PY
+          grep -o 'data-app-version="[^"]*"' docs/index.html
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 

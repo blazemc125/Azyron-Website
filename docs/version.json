@@ -1,0 +1,5 @@
+{
+  "version": "dev",
+  "builtAt": null,
+  "note": "Stamped by .github/workflows/website.yml on every deploy; the page reloads once if its cached copy is older than this."
+}

@@ -17,6 +17,22 @@ import {
 } from './github-data.js';
 import { loadBaseline, computeSinceLaunch } from './counter.js';
 
+/**
+ * Version handshake.
+ *
+ * GitHub Pages serves files with a 10-minute cache, so a visitor can end up
+ * running yesterday's HTML with today's JS (or the reverse) for a few minutes
+ * after a deploy. That produced a real bug once: the page said "total
+ * downloads" while the JS happily wrote "since launch" numbers into it.
+ *
+ * The workflow stamps ./version.json on each deploy. If the page we loaded is
+ * not the version that is live, we reload once — guarded by sessionStorage so a
+ * broken deploy can never trap someone in a reload loop.
+ */
+const RELOAD_GUARD = 'azyron:reloaded-for';
+const APP_VERSION = document.documentElement.dataset.appVersion || '';
+
+
 // Allow ?owner=…&repo=…&tag=… so a fork can point the page at its own release.
 (() => {
   const params = new URLSearchParams(location.search);
@@ -904,6 +920,22 @@ function noteLocalClick(asset) {
   setTimeout(() => { state.localPending = 0; }, 20_000);
 }
 
+/* ------------------------------------------------------- version handshake */
+async function checkVersion() {
+  try {
+    const response = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const live = await response.json();
+    const liveVersion = String(live.version || '');
+    if (!liveVersion || !APP_VERSION || liveVersion === APP_VERSION) return;
+    if (sessionStorage.getItem(RELOAD_GUARD) === liveVersion) return;
+    sessionStorage.setItem(RELOAD_GUARD, liveVersion);
+    location.reload();
+  } catch {
+    /* offline or blocked — the cached page is perfectly usable */
+  }
+}
+
 /* ------------------------------------------------------------------ polling */
 async function pollStats(force = false) {
   const release = await getRelease({ force });
@@ -1083,6 +1115,7 @@ async function boot() {
   state.baseline = await loadBaseline();
   await pollStats();
   loadChangelog();
+  checkVersion();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

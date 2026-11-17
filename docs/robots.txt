@@ -1,3 +1,6 @@
+# AZYRON CLIENT
+# Site root is a project sub-path, so the sitemap URL must include it.
 User-agent: *
 Allow: /
-Disallow: /api/
+
+Sitemap: https://blazemc125.github.io/Azyron-Website/sitemap.xml
