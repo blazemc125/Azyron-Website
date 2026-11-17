@@ -180,7 +180,26 @@ for (const file of htmlFiles) {
 }
 if (!errors.length) ok('hidden attribute is enforced by CSS');
 
-/* --------------------------------------------------- 7. size budget (warning) */
+/* ------------------------------------ 7. section numbering must go 01..0N in order */
+{
+  const index = read(join(SITE, 'index.html'));
+  const numbers = [...index.matchAll(/<span class="index">(\d+)<\/span>\s*([^<]*)/g)].map((m) => ({
+    n: Number(m[1]),
+    label: m[2].trim(),
+  }));
+  numbers.forEach((entry, i) => {
+    if (entry.n !== i + 1) {
+      fail(
+        `docs/index.html: section "${entry.label}" is numbered ${String(entry.n).padStart(2, '0')} but is #${i + 1} on the page — inserting a section must renumber the rest`,
+      );
+    }
+  });
+  const live = numbers.findIndex((entry) => entry.label.startsWith('LIVE DOWNLOAD'));
+  if (live !== 0) fail('docs/index.html: the LIVE DOWNLOAD STATISTICS section must come first, directly under the hero');
+  if (!errors.length) ok(`section numbering 01..${String(numbers.length).padStart(2, '0')} in page order`);
+}
+
+/* --------------------------------------------------- 8. size budget (warning) */
 const totalKb = listFiles(SITE)
   .filter((f) => !f.endsWith('.woff2'))
   .reduce((sum, f) => sum + statSync(join(SITE, f)).size, 0) / 1024;
