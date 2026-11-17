@@ -1,0 +1,50 @@
+# Publishes the AZYRON CLIENT website (docs/) to GitHub Pages.
+#
+# Address: https://blazemc125.github.io/AzyronWebsite/
+# Requires: Settings → Pages → Build and deployment → Source = "GitHub Actions".
+#
+# The site is fully static: the browser talks to the public GitHub Releases API
+# directly, so no build step, secrets or server are required.
+
+name: Deploy website to GitHub Pages
+
+on:
+  push:
+    branches:
+      - v3_openjdk
+      - main
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

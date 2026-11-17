@@ -7,6 +7,9 @@ import { getRelease, getReleaseHistory, findAsset, cacheStats, humanFileSize } f
 import { recordDownload, downloadTotals } from './lib/downloads.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// The static site lives in ../../docs so the exact same files can be published
+// by GitHub Pages. The optional Express server only adds proxying + caching.
+const SITE_DIR = join(__dirname, '..', 'docs');
 
 export function createApp() {
   const app = express();
@@ -239,7 +242,7 @@ export function createApp() {
   app.get('/api/*', (req, res) => res.status(404).json({ ok: false, error: 'Unknown API route' }));
 
   app.use(
-    express.static(join(__dirname, 'public'), {
+    express.static(SITE_DIR, {
       extensions: ['html'],
       maxAge: '1h',
       setHeaders(res, path) {
@@ -249,7 +252,7 @@ export function createApp() {
   );
 
   app.use((req, res) => {
-    res.status(404).sendFile(join(__dirname, 'public', '404.html'));
+    res.status(404).sendFile(join(SITE_DIR, '404.html'));
   });
 
   return app;

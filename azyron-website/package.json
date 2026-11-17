@@ -2,7 +2,7 @@
   "name": "azyron-website",
   "version": "1.0.0",
   "private": true,
-  "description": "Premium marketing + download website for AZYRON CLIENT. Live GitHub release data, server-side caching, proxied downloads.",
+  "description": "AZYRON CLIENT website: static site in ../docs published on GitHub Pages, plus an optional Express cache/proxy server.",
   "type": "module",
   "engines": {
     "node": ">=20"

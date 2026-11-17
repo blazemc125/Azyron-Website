@@ -227,10 +227,20 @@ test('changelog endpoint lists releases', async () => {
   assert.equal(body.releases[0].assets.length, 2);
 });
 
-test('serves the site shell and 404 page', async () => {
+test('serves the static site (docs/) and its 404 page', async () => {
   const home = await fetch(`${baseUrl}/`);
   assert.equal(home.status, 200);
-  assert.match(await home.text(), /AZYRON/i);
+  const html = await home.text();
+  assert.match(html, /AZYRON/i);
+  // the same files GitHub Pages publishes: relative asset URLs only
+  assert.match(html, /href="\.\/assets\/css\/styles\.css"/);
+  assert.ok(!/href="\/assets/.test(html), 'no root-absolute asset URLs (must work under /AzyronWebsite/)');
+
+  const js = await fetch(`${baseUrl}/assets/js/github-data.js`);
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get('content-type'), /javascript/);
+
   const missing = await fetch(`${baseUrl}/nope-not-a-page`);
   assert.equal(missing.status, 404);
+  assert.match(await missing.text(), /404/);
 });

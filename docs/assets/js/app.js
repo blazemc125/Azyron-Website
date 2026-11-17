@@ -1,10 +1,30 @@
 /* =============================================================================
    AZYRON CLIENT — front-end controller
-   All numbers on this page come from /api/*, which is backed by the real
-   GitHub Releases API (server-side cached). Nothing is hard-coded or faked.
+
+   Runs as a static site (GitHub Pages). All live data comes from the public
+   GitHub Releases API through ./github-data.js, which caches responses in
+   localStorage and uses conditional requests so the 60-requests/hour
+   anonymous limit is never exhausted. Nothing here is hard-coded or faked.
    ============================================================================= */
 
-const POLL_MS = 5000;
+import {
+  POLL_MS,
+  api,
+  getRelease,
+  getReleaseHistory,
+  recordLocalDownload,
+  getLocalDownloads,
+  getDiagnostics,
+} from './github-data.js';
+
+// Allow ?owner=…&repo=…&tag=… so a fork can point the page at its own release.
+(() => {
+  const params = new URLSearchParams(location.search);
+  for (const key of ['owner', 'repo', 'tag']) {
+    const value = params.get(key);
+    if (value) api[key] = value;
+  }
+})();
 
 const state = {
   release: null,
@@ -283,6 +303,9 @@ function applyRelease(release) {
   state.lastUpdatedAt = new Date();
 
   const versionLabel = `v${release.version || release.tag}`;
+  const local = getLocalDownloads();
+  release.analytics = { proxied: local.total, byAssetId: local.byAsset };
+  release.totals.proxied = local.total;
 
   // nav + footer + everywhere
   setText($('#navVersion'), versionLabel);
@@ -301,7 +324,7 @@ function applyRelease(release) {
     const bits = [
       `${release.assets.length} ${release.assets.length === 1 ? 'asset' : 'assets'}`,
       release.totals.sizeLabel || formatBytes(release.totals.size),
-      release.totals.proxied > 0 ? `${formatNumber(release.totals.proxied)} via this site` : 'counted by GitHub',
+      release.totals.proxied > 0 ? `${formatNumber(release.totals.proxied)} started here` : 'counted by GitHub',
     ];
     hint.innerHTML = `<span>${escapeHtml(bits.join(' · '))}</span>`;
   }
@@ -353,10 +376,15 @@ function applyRelease(release) {
     sync.classList.remove('is-live', 'is-error', 'is-stale');
     if (!release.ok) {
       sync.classList.add('is-error');
-      syncText.textContent = 'GitHub unavailable';
+      syncText.textContent = /rate limit/i.test(release.error || '') ? 'GitHub rate limited' : 'GitHub unavailable';
     } else if (release.stale) {
       sync.classList.add('is-stale');
-      syncText.textContent = `Cached · ${relativeTime(release.fetchedAt)}`;
+      syncText.textContent = /rate limit/i.test(release.error || release.warning || '')
+        ? 'Rate limited · cached data'
+        : `Cached · ${relativeTime(release.fetchedAt)}`;
+    } else if (release.fromCache) {
+      sync.classList.add('is-live');
+      syncText.textContent = `Live · checked ${relativeTime(release.fetchedAt)}`;
     } else {
       sync.classList.add('is-live');
       syncText.textContent = `Live · updated ${relativeTime(release.fetchedAt)}`;
@@ -373,7 +401,7 @@ function applyRelease(release) {
   if (errBanner) errBanner.hidden = Boolean(release.ok);
   if (staleBanner) staleBanner.hidden = !(release.ok && release.stale);
   if (!release.ok) {
-    setText($('#downloadsErrorText'), `${release.error || 'The GitHub release API could not be reached.'} Retrying automatically every few seconds.`);
+    setText($('#downloadsErrorText'), `${release.error || 'The GitHub release API could not be reached.'} Retrying automatically — the official download links below still work.`);
   }
 
   renderAssets(release);
@@ -465,7 +493,7 @@ function assetCardHtml(asset) {
   const copy = assetCopy[asset.kind] || assetCopy.file;
   const served = state.release?.analytics?.byAssetId?.[String(asset.id)] || 0;
   return `
-  <article class="asset" data-asset-id="${asset.id}" data-download-url="${escapeHtml(asset.downloadUrl)}">
+  <article class="asset" data-asset-id="${asset.id}" data-download-url="${escapeHtml(asset.browserDownloadUrl)}">
     <div class="asset__top">
       <div class="asset__icon">${iconFor(asset.kind)}</div>
       <div class="asset__ident">
@@ -495,7 +523,7 @@ function assetCardHtml(asset) {
         <span class="btn__meta">${escapeHtml(copy.label)}</span>
         <svg class="btn__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 19h16"/></svg>
       </button>
-      <a class="asset__direct" href="${escapeHtml(asset.downloadUrl)}" download="${escapeHtml(asset.name)}" title="Direct download link">
+      <a class="asset__direct" href="${escapeHtml(asset.browserDownloadUrl)}" download="${escapeHtml(asset.name)}" rel="noopener noreferrer" title="Direct download from GitHub">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7m0 0H9m8 0v8"/></svg>
         <span class="asset__direct-label">Direct download link</span>
       </a>
@@ -529,6 +557,7 @@ function closeModal() {
     document.body.classList.remove('is-locked');
   }
   if (state.activeDownload?.controller) {
+    state.activeDownload.userCancelled = true;
     try { state.activeDownload.controller.abort(); } catch { /* noop */ }
     state.activeDownload = null;
   }
@@ -549,7 +578,7 @@ function resetModal(asset) {
   const copy = assetCopy[asset.kind] || assetCopy.file;
   setText($('#modalKind'), asset.kind.toUpperCase());
   setText($('#modalTitle'), asset.name);
-  setText($('#modalSub'), 'Starting secure transfer…');
+  setText($('#modalSub'), 'Starting download…');
   setProgress(null);
   setText($('#progressPct'), '0%');
   setText($('#progressTransferred'), `0 B / ${asset.sizeLabel || formatBytes(asset.size)}`);
@@ -587,23 +616,43 @@ async function startDownload(asset, card) {
   checkSaved.classList.add('is-busy');
   if (card) card.classList.add('is-downloading');
 
+  const url = api.assetUrl(asset);
+  if (!url) {
+    showDownloadError(asset, new Error('This asset has no download URL'), card);
+    return;
+  }
+
+  // Count the click immediately: this is a real download attempt started from
+  // this site, and it is logged separately from GitHub's own counter.
+  const localLog = recordLocalDownload(asset);
+  const cardServed = card?.querySelector('[data-field="served"]');
+  if (cardServed) cardServed.textContent = formatNumber(localLog.byAsset[String(asset.id)] || 1);
+
+  // The browser starts saving the file straight away. If we can also read the
+  // body we mirror the byte stream into the progress UI at the same time.
+  const nativeAnchor = document.createElement('a');
+  let usingNative = false;
   const started = performance.now();
   let received = 0;
+  let firstByteAt = 0;
   let lastTick = started;
   let lastBytes = 0;
   let raf = 0;
 
-  const limit = total > 0 ? total : 0;
-  const render = (fraction, receivedBytes) => {
-    const pct = limit > 0 ? Math.min(100, (receivedBytes / limit) * 100) : fraction * 100;
-    setProgress(Number.isFinite(pct) ? pct : 0);
-    pctEl.textContent = limit > 0 ? `${Math.floor(pct)}%` : '—';
-    transferredEl.textContent = `${formatBytes(receivedBytes)} / ${asset.sizeLabel || formatBytes(total)}`;
+  let expected = total;
+
+  const render = (receivedBytes) => {
+    const pct = expected > 0 ? Math.min(100, (receivedBytes / expected) * 100) : 0;
+    setProgress(expected > 0 ? pct : null);
+    pctEl.textContent = expected > 0 ? `${Math.floor(pct)}%` : '—';
+    transferredEl.textContent = `${formatBytes(receivedBytes)} / ${formatBytes(expected)}`;
     if (card) {
       const inlineBar = card.querySelector('.asset__progress-bar');
       if (inlineBar) inlineBar.style.width = `${pct.toFixed(1)}%`;
     }
-    document.title = limit > 0 ? `${Math.floor(pct)}% · ${asset.name} — AZYRON CLIENT` : `Downloading ${asset.name} — AZYRON CLIENT`;
+    document.title = expected > 0
+      ? `${Math.floor(pct)}% · ${asset.name} — AZYRON CLIENT`
+      : `Downloading ${asset.name} — AZYRON CLIENT`;
     const now = performance.now();
     if (now - lastTick > 320) {
       const bps = ((receivedBytes - lastBytes) / (now - lastTick)) * 1000;
@@ -613,47 +662,83 @@ async function startDownload(asset, card) {
     }
   };
 
+  const useNativeDownload = () => {
+    usingNative = true;
+    nativeAnchor.href = url;
+    nativeAnchor.download = asset.name;
+    nativeAnchor.rel = 'noopener noreferrer';
+    document.body.appendChild(nativeAnchor);
+    nativeAnchor.click();
+    setTimeout(() => nativeAnchor.remove(), 1000);
+    setProgress(null);
+    $('#modalSub').textContent = 'Your browser is saving the file…';
+    pctEl.textContent = '—';
+    transferredEl.textContent = asset.sizeLabel || formatBytes(total);
+    checkSaved.classList.remove('is-busy');
+    checkSaved.classList.add('is-done');
+    $('#modalCancel').hidden = true;
+    $('#modalDone').hidden = false;
+    if (card) card.classList.remove('is-downloading');
+    toast(`${asset.name} — download started in your browser`, 'ok');
+    return localLog;
+  };
+
+  // If the mirrored read has not produced a byte in this window we stop trying
+  // and hand the file to the browser instead. The download always starts.
+  let firstByteTimer = setTimeout(() => {
+    if (firstByteAt === 0) {
+      clearTimeout(firstByteTimer);
+      try { controller.abort(); } catch { /* noop */ }
+      if (!usingNative) useNativeDownload();
+    }
+  }, 3000);
+
   try {
-    const response = await fetch(asset.downloadUrl, {
+    if (firstByteAt !== 0) return localLog;
+    const response = await fetch(url, {
       signal: controller.signal,
-      credentials: 'same-origin',
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
       headers: { Accept: 'application/octet-stream' },
     });
 
-    if (!response.ok) throw new Error(`Server responded ${response.status}`);
+    if (!response.ok) throw new Error(`GitHub responded ${response.status}`);
 
     const type = response.headers.get('content-type') || '';
-    if (type.includes('text/html')) {
-      throw new Error('Server returned a web page instead of the file');
-    }
+    if (type.includes('text/html')) throw new Error('GitHub returned a web page instead of the file');
 
     const length = Number(response.headers.get('content-length')) || total;
+    if (Number.isFinite(length) && length > 0) expected = length;
+    let reader = null;
+    const chunks = [];
+    $('#modalSub').textContent = 'Receiving file from GitHub…';
 
     if (!response.body || !response.body.getReader) {
-      // Browser cannot stream — hand the download to the browser directly.
-      window.location.href = asset.downloadUrl;
-      finish('Your browser is downloading the file directly.');
-      return;
+      useNativeDownload();
+      return localLog;
     }
-
-    const reader = response.body.getReader();
-    const chunks = [];
-    $('#modalSub').textContent = 'Receiving file…';
+    reader = response.body.getReader();
 
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (firstByteAt === 0) {
+        firstByteAt = performance.now();
+        clearTimeout(firstByteTimer);
+      }
       chunks.push(value);
       received += value.byteLength;
       if (!raf) {
         raf = requestAnimationFrame(() => {
-          render(length ? received / length : 0, received);
+          render(received);
           raf = 0;
         });
       }
     }
+    clearTimeout(firstByteTimer);
     if (raf) cancelAnimationFrame(raf);
-    render(length ? received / length : 1, received);
+    render(length || received);
 
     setProgress(100);
     pctEl.textContent = '100%';
@@ -661,13 +746,32 @@ async function startDownload(asset, card) {
     transferComplete(chunks, response.headers.get('content-type'), asset);
   } catch (error) {
     if (error.name === 'AbortError') {
+      clearTimeout(firstByteTimer);
+      if (!usingNative && state.activeDownload?.userCancelled !== true) {
+        useNativeDownload();
+        return localLog;
+      }
       document.title = 'AZYRON CLIENT — Performance. Smoothness. Style.';
       $('#modalSub').textContent = 'Download cancelled.';
       checkSaved.classList.remove('is-busy');
       if (card) card.classList.remove('is-downloading');
       return;
     }
+    clearTimeout(firstByteTimer);
+    // Any transport problem on the mirrored read (CORS, offline, timeout,
+    // cross-origin restrictions) is not fatal: hand the exact same asset URL
+    // to the browser so the download still happens.
+    const transportLike =
+      /fetch|network|load failed|cors|terminated|aborted|timeout/i.test(error.message || '') ||
+      error.name === 'TypeError' ||
+      error.name === 'NetworkError' ||
+      error instanceof TypeError;
+    if (!usingNative && transportLike) {
+      useNativeDownload();
+      return localLog;
+    }
     showDownloadError(asset, error, card);
+    return localLog;
   }
 }
 
@@ -712,7 +816,7 @@ function showDownloadError(asset, error, card) {
   errBox.hidden = false;
   setText($('#modalErrorText'), `${error.message}. Use the direct GitHub link below — it points at the same official asset.`);
   const direct = $('#modalDirectLink');
-  direct.href = asset.githubUrl || asset.downloadUrl;
+  direct.href = asset.browserDownloadUrl || api.assetUrl(asset);
   direct.setAttribute('download', asset.name);
   $('#checkSaved').classList.remove('is-busy');
   $('#modalCancel').hidden = true;
@@ -721,48 +825,27 @@ function showDownloadError(asset, error, card) {
 }
 
 /* ------------------------------------------------------------------ polling */
-async function fetchJSON(url, signal) {
-  const response = await fetch(url, { signal, headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-  if (!response.ok && response.status >= 500) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
 async function pollStats(force = false) {
-  try {
-    const release = await fetchJSON(`/api/release${force ? '?force=1' : ''}`);
-    state.failures = 0;
-    if (release.ok) {
-      applyRelease(release);
-    } else {
-      state.release = { ...release, assets: [] };
-      applyRelease(state.release);
-    }
-    return release;
-  } catch (error) {
-    state.failures += 1;
-    const sync = $('#syncState');
-    const syncText = $('#syncText');
-    if (sync && syncText && state.failures > 1) {
-      sync.classList.remove('is-live', 'is-stale');
-      sync.classList.add('is-error');
-      syncText.textContent = `Retrying (${state.failures})…`;
-    }
-    if (state.failures === 3) {
-      toast('Connection to the site API failed — retrying.', 'warn');
-    }
-    return null;
-  }
+  const release = await getRelease({ force });
+  state.failures = release.stale ? state.failures + 1 : 0;
+  state.release = release;
+  applyRelease(release);
+  return release;
 }
 
 function schedulePoll() {
   clearTimeout(state.pollTimer);
-  const delay = state.failures > 0 ? Math.min(POLL_MS * 2, 15000) : POLL_MS;
+  const diag = getDiagnostics();
+  const remaining = diag.rateLimit.remaining;
+  // Poll every 5s while the GitHub budget is healthy; slow down (and let the
+  // local cache answer) as it runs low. This is what keeps the site alive on
+  // shared/NAT'd networks where 60 requests/hour are shared by everyone.
+  const base = state.failures > 0 ? Math.min(POLL_MS * 2, 15_000) : POLL_MS;
+  const throttle = Number.isFinite(remaining) && remaining <= 2 ? 30_000 : base;
   state.pollTimer = setTimeout(async () => {
     if (!document.hidden) await pollStats();
     schedulePoll();
-  }, delay);
+  }, throttle);
 }
 
 function initPolling() {
@@ -817,15 +900,13 @@ function renderChangelog(payload) {
 
 async function loadChangelog() {
   const list = $('#changelogList');
-  try {
-    const payload = await fetchJSON('/api/releases');
+  const payload = await getReleaseHistory();
+  if (payload.ok) {
     renderChangelog(payload);
-  } catch {
-    if (list) {
-      list.setAttribute('aria-busy', 'false');
-      list.innerHTML = `<div class="timeline__empty">Release history could not be loaded. Retrying…</div>`;
-    }
-    setTimeout(loadChangelog, 15000);
+  } else if (list) {
+    list.setAttribute('aria-busy', 'false');
+    list.innerHTML = `<div class="timeline__empty">Release history could not be loaded — ${escapeHtml(payload.error || 'GitHub is unreachable')}. The latest release is still shown above.</div>`;
+    setTimeout(loadChangelog, 30_000);
   }
 }
 

@@ -1,16 +1,17 @@
+# Optional Express server that serves ../docs with a shared cache + download proxy.
 FROM node:22-alpine
 
-WORKDIR /app
+WORKDIR /app/azyron-website
 ENV NODE_ENV=production PORT=3000 HOST=0.0.0.0
 
-COPY package*.json ./
+COPY azyron-website/package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
 
-COPY . .
+COPY docs /app/docs
+COPY azyron-website /app/azyron-website
 
-# download analytics log lives on a mounted volume in production
-RUN mkdir -p /app/data
-VOLUME ["/app/data"]
+RUN mkdir -p /app/azyron-website/data
+VOLUME ["/app/azyron-website/data"]
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

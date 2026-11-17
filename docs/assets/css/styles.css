@@ -3,14 +3,14 @@
    PERFORMANCE. SMOOTHNESS. STYLE.
    ========================================================================== */
 
-@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 600; font-display: swap; src: url('/assets/fonts/space-grotesk-latin-600-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/space-grotesk-latin-700-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-latin-400-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-latin-500-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/assets/fonts/inter-latin-600-normal.woff2') format('woff2'); }
-@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/inter-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/space-grotesk-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 700; font-display: swap; src: url('../fonts/space-grotesk-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/inter-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/inter-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/inter-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('../fonts/inter-latin-700-normal.woff2') format('woff2'); }
 
 :root {
   --black: #000000;
@@ -888,6 +888,8 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
 .footer__built { display: inline-flex; align-items: center; gap: 0.45rem; }
 .footer__built a { color: var(--text-2); border-bottom: 1px solid var(--line-strong); }
 .footer__built a:hover { color: #fff; }
+.footer__sep { color: var(--text-4); }
+.footer__built { flex-wrap: wrap; }
 
 /* ---------------------------------------------------------------- modal */
 .modal {
@@ -1089,3 +1091,12 @@ html.no-js [data-reveal] { opacity: 1; transform: none; }
   .nav, .mobile-menu, .modal, .toast-stack, .grain, .spotlight, .scroll-progress, .marquee { display: none !important; }
   body { background: #fff; color: #000; }
 }
+
+/* ---------------------------------------------------------------- static-host notes */
+.banner--info { border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.04); color: var(--text-2); }
+.banner--info .banner__body strong { color: #fff; }
+.asset__note {
+  font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.06em;
+  color: var(--text-4); display: inline-flex; align-items: center; gap: 0.35rem;
+}
+.asset__note svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; }
