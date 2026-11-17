@@ -35,9 +35,6 @@ jobs:
   test:
     name: Test website
     runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.filter.outputs.changed }}
-      modules_ok: ${{ steps.modules.outputs.ok }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,15 +97,14 @@ jobs:
       # Independent of the website: verify every workflow file is valid YAML and
       # that referenced local scripts exist.
       - name: Validate CI configuration
-        id: modules
-        if: always()
         shell: bash
         run: |
+          set -euo pipefail
           pip install --quiet pyyaml
           python3 - <<'PY'
           import glob, sys, yaml
           ok = True
-          for path in glob.glob('.github/workflows/*.yml'):
+          for path in sorted(glob.glob('.github/workflows/*.yml')):
               try:
                   yaml.safe_load(open(path))
                   print(f'ok: {path}')
@@ -117,7 +113,6 @@ jobs:
                   ok = False
           sys.exit(0 if ok else 1)
           PY
-          echo "ok=true" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Deploy to GitHub Pages
