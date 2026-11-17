@@ -53,6 +53,11 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Author `display:` rules outrank the user-agent `[hidden] { display: none }`,
+   so a component like `.banner { display: flex }` would defeat the hidden
+   attribute. Keep the attribute authoritative for every element. */
+[hidden] { display: none !important; }
+
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
@@ -640,7 +645,6 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   transition: transform 0.45s var(--ease), width 0.45s var(--ease);
 }
 .install__panels { margin-top: 1.5rem; }
-.install__panel[hidden] { display: none; }
 .install__panel.is-active { animation: panelIn 0.4s var(--ease) both; }
 @keyframes panelIn { from { opacity: 0; transform: translateY(8px); } }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.1rem; counter-reset: step; }
@@ -897,7 +901,6 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   display: flex; align-items: center; justify-content: center;
   padding: var(--gutter); overflow-y: auto; overscroll-behavior: contain;
 }
-.modal[hidden] { display: none; }
 .modal__scrim {
   position: absolute; inset: 0; background: rgba(0,0,0,0.78);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);

@@ -165,7 +165,22 @@ for (const file of htmlFiles) {
 warnings.push(...parserWarnings);
 if (!errors.length) ok('HTML ids, anchors and ARIA references resolve');
 
-/* --------------------------------------------------- 6. size budget (warning) */
+/* --------------------------------- 6. the [hidden] attribute must stay honest */
+const css = listFiles(SITE).filter((f) => f.endsWith('.css')).map((f) => read(join(SITE, f))).join('\n');
+const hiddenRuleIsGlobal = /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/.test(css);
+for (const file of htmlFiles) {
+  const full = join(SITE, file);
+  if (!existsSync(full)) continue;
+  const html = read(full);
+  const hiddenEls = [...html.matchAll(/<([a-z0-9-]+)[^>]*\shidden(?:[\s=>])[^>]*>/gi)];
+  if (!hiddenEls.length) continue;
+  if (!hiddenRuleIsGlobal) {
+    fail(`docs/${file}: ${hiddenEls.length} element(s) use the hidden attribute but styles.css has no global [hidden]{display:none!important} rule — a display:flex/x rule can override it and leak the element`);
+  }
+}
+if (!errors.length) ok('hidden attribute is enforced by CSS');
+
+/* --------------------------------------------------- 7. size budget (warning) */
 const totalKb = listFiles(SITE)
   .filter((f) => !f.endsWith('.woff2'))
   .reduce((sum, f) => sum + statSync(join(SITE, f)).size, 0) / 1024;
