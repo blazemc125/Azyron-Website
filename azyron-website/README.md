@@ -104,6 +104,7 @@ Check all four:
 | JAR + MRPACK | Both supported, plus zip/exe/apk/7z and any future asset type |
 | Download progress | Streamed `fetch` → native `<progress>`, %, bytes, speed, inline card bar |
 | Live statistics | Total Downloads · Latest Version · Available Files · Last Updated |
+| Live download cards | JAR + MRPACK cards, combined total, 1-second refresh, pulsing LIVE badge, animated counts |
 | Sections | Home · Downloads · Features · Changelog · About · Support |
 
 ### The download counter: "Downloads Since Launch"
@@ -123,9 +124,9 @@ sinceLaunch = live GitHub download_count − baseline captured at launch
   the DOWNLOAD buttons hand to the browser. Nothing is random or hard-coded.
 - **JAR and MRPACK are counted separately**, each against its own baseline, and
   shown under the headline figure.
-- The UI re-reads GitHub every 5 seconds. Clicking DOWNLOAD nudges *your own view*
-  by one immediately (so the click feels acknowledged), and the authoritative shared
-  value replaces it on the next tick. The local nudge never reaches other visitors.
+- The UI re-checks GitHub **every second**. Clicking DOWNLOAD files a small *claim*
+  (see below) so the number rises once and never falls back while GitHub catches up.
+  The claim is per-browser and never reaches other visitors.
 - Per-asset cards show **SINCE LAUNCH** and **ALL-TIME (GITHUB)** side by side, so
   GitHub's lifetime figure is still visible without being presented as the counter.
 
@@ -137,6 +138,45 @@ log keeps it global, real and tamper-resistant.
 Tests: `node --test scripts/test-counter.mjs` (12 tests, run in CI) cover the zero start,
 independent JAR/MRPACK counting, the never-negative guarantee, and new assets published
 after launch.
+
+### The live statistics section
+
+Directly under the hero, `#live-stats` shows two cards — **JAR FILE** and
+**MODPACK (.MRPACK)** — each with its all-time total, its since-launch counter and its
+own download button, plus a combined total above them.
+
+**How can it refresh every second without burning the 60/hour quota?** Conditional
+requests. Once `github-data.js` holds an ETag, a revalidation that GitHub answers with
+**304 Not Modified** does not count against the rate limit at all. `pollInterval()` reads
+what GitHub is actually granting:
+
+| GitHub's response | Interval |
+|---|---|
+| 304 (not modified) | **1 s** — the requested cadence, free |
+| 200, first change | 5 s |
+| 200, repeated changes | 10 s → 20 s |
+| quota ≤ 8 remaining | 15 s |
+| quota ≤ 2 remaining | 60 s |
+| 403 / 429 | waits out the reset window |
+
+The numbers themselves cannot change between GitHub reads, so this is as fast as the
+data allows. Separately, the *"Updated …"* label and the LIVE badge tick locally once a
+second — no network involved — so the section always answers "is this current?".
+
+**The optimistic claim.** A click and GitHub's counter are a few seconds apart. Rather
+than bump the number and let it fall back (which looks broken at a 1-second cadence), the
+click records *"one more of this asset, from this confirmed figure"*. `withPending()`
+folds open claims on top of every render and retires each one as GitHub's counter actually
+moves by that amount. Claims are **per asset**, so the two cards and the combined total
+always add up.
+
+**The LIVE badge is honest.** `liveState()` returns `live` only for a read that succeeded
+in this poll; `cached` for stale data or a read older than 20 s; `offline` when GitHub is
+unreachable. It is never allowed to say LIVE while the numbers are not.
+
+Tests: `node --test scripts/test-live-stats.mjs` (16 tests, run in CI) cover formatting,
+the animation maths, the "just now" label, the LIVE badge states, asset picking, and an
+assertion that the module contains no `Math.random` and no hard-coded download totals.
 
 ---
 
@@ -179,7 +219,7 @@ npm start       # http://localhost:3000
 | Route | Description |
 | --- | --- |
 | `GET /api/release` | Cached release payload + assets + totals |
-| `GET /api/stats` | Lightweight counters for the 5 s poll |
+| `GET /api/stats` | Lightweight counters for the live poll |
 | `GET /api/releases` | Release history for the Changelog |
 | `GET /api/download/:assetId` | Streams the real asset (Range supported) |
 | `GET /api/health` | Uptime, cache state, GitHub rate-limit info |

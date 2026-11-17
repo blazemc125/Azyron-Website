@@ -6,7 +6,7 @@
    and is built around three constraints that actually matter in production:
 
    1. RATE LIMITS — an unauthenticated IP gets 60 requests/hour. If every tab
-      polled GitHub every 5 seconds we would burn that in minutes, so:
+      revalidated GitHub every second we would burn that in minutes, so:
         • responses are cached in localStorage and kept for CACHE_TTL_MS;
         • refreshes use conditional requests (ETag / If-None-Match). A 304
           response does NOT count against the rate limit;
@@ -20,7 +20,19 @@
       /AzyronWebsite/, at a custom domain, or from file:// .
    ============================================================================= */
 
-export const POLL_MS = 5000;
+/**
+ * Visible refresh cadence for the live statistics section.
+ *
+ * 1 000 ms is what the cards actually revalidate at — but only while GitHub
+ * answers conditional requests with 304, which does NOT consume the 60/hour
+ * unauthenticated quota. If GitHub starts returning full 200s the cost is real,
+ * so the interval automatically grows (5 s → 30 s). The section therefore polls
+ * as fast as GitHub genuinely allows and never faster than it can afford.
+ */
+export const POLL_MS = 1000;
+
+/** Conservative cadence used whenever fast revalidation is not free. */
+export const SAFE_POLL_MS = 5000;
 
 const DEFAULTS = {
   owner: 'blazemc125',
@@ -28,8 +40,8 @@ const DEFAULTS = {
   tag: 'azyronclient-v1.0.0',
 };
 
-const CACHE_TTL_MS = 5000; // may be raised automatically when rate-limited
-const MIN_TTL_MS = 5000;
+const CACHE_TTL_MS = 1000; // may be raised automatically when rate-limited
+const MIN_TTL_MS = 1000;
 const MAX_TTL_MS = 10 * 60 * 1000;
 const HISTORY_TTL_MS = 5 * 60 * 1000;
 const LOW_BUDGET = 8; // remaining requests below this → slow down
@@ -161,6 +173,36 @@ function readRateLimit(response) {
 
 export const getRateLimit = () => ({ ...rateLimit });
 
+/**
+ * How long to wait before the next revalidation.
+ *
+ * The live section asks for a 1-second refresh. That is only honest while GitHub
+ * answers with 304 Not Modified, because a 304 is free against the rate limit
+ * and costs GitHub nothing. As soon as revalidation starts returning full
+ * payloads (or the budget runs low) the interval steps back up instead of
+ * burning quota and getting the visitor throttled.
+ */
+export function pollInterval() {
+  const { remaining, reset } = rateLimit;
+
+  if (Number.isFinite(remaining)) {
+    if (remaining <= 0 && Number.isFinite(reset)) {
+      return Math.max(SAFE_POLL_MS, reset * 1000 - Date.now() + 5000);
+    }
+    if (remaining <= 2) return 60_000;
+    if (remaining <= LOW_BUDGET) return 15_000;
+  }
+
+  if (failures > 0) return Math.min(SAFE_POLL_MS * failures, 30_000);
+
+  // Free revalidation → 1 s. Paid revalidation → back off progressively so a
+  // burst of visitors cannot exhaust the shared quota.
+  if (freeRefreshes > 0 && modifiedStreak === 0) return POLL_MS;
+  if (modifiedStreak <= 1) return SAFE_POLL_MS;
+  if (modifiedStreak <= 3) return SAFE_POLL_MS * 2;
+  return Math.min(SAFE_POLL_MS * 4, 30_000);
+}
+
 /** Poll interval grows when the API budget is scarce, so the site never trips 429. */
 function adaptiveTtl() {
   const { remaining, reset } = rateLimit;
@@ -179,6 +221,9 @@ function adaptiveTtl() {
 let inFlight = null;
 let failures = 0;
 let lastError = null;
+/* consecutive 304s (free refreshes) and consecutive 200s (paid refreshes) */
+let freeRefreshes = 0;
+let modifiedStreak = 0;
 
 function headers(etag) {
   const h = { Accept: 'application/vnd.github+json' };
@@ -224,10 +269,18 @@ export async function getRelease({ force = false, signal } = {}) {
       if (response.status === 304 && cached?.data) {
         // Not modified — free refresh, does not consume the rate limit.
         readRateLimit(response);
-        const ttl = adaptiveTtl();
+        freeRefreshes += 1;
+        modifiedStreak = 0;
+        const ttl = Math.min(adaptiveTtl(), pollInterval());
         store.set(STORE_KEY, { ...cached, at: now, ttl });
         failures = 0;
-        return { ...cached.data, fetchedAt: new Date(now).toISOString(), fromCache: true, stale: false };
+        return {
+          ...cached.data,
+          fetchedAt: new Date(now).toISOString(),
+          fromCache: true,
+          stale: false,
+          notModified: true,
+        };
       }
 
       readRateLimit(response);
@@ -246,7 +299,9 @@ export async function getRelease({ force = false, signal } = {}) {
 
       const raw = await response.json();
       const data = normalizeRelease(raw);
-      const ttl = adaptiveTtl();
+      freeRefreshes = 0;
+      modifiedStreak += 1;
+      const ttl = Math.min(adaptiveTtl(), pollInterval());
       store.set(STORE_KEY, {
         data,
         etag: response.headers.get('etag'),

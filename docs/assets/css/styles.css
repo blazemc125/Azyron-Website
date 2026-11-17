@@ -1032,6 +1032,368 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
 @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.09); } 100% { transform: scale(1); } }
 
 /* ---------------------------------------------------------------- responsive */
+
+/* ==========================================================================
+   LIVE DOWNLOAD STATISTICS
+   Sits directly under the hero. Two premium cards (JAR / MRPACK), a combined
+   total, a green pulsing LIVE badge and tabular figures that animate as the
+   numbers change.
+   ========================================================================== */
+
+.section--live {
+  padding-top: clamp(2.6rem, 6vw, 4.4rem);
+  padding-bottom: clamp(2.8rem, 6vw, 4.6rem);
+  position: relative;
+  isolation: isolate;
+}
+
+.section--live::before {
+  content: '';
+  position: absolute;
+  inset: -10% 0 30%;
+  z-index: -1;
+  background: radial-gradient(58% 48% at 50% 0%, rgba(255, 255, 255, 0.075), transparent 72%);
+  pointer-events: none;
+}
+
+.live__head { text-align: center; margin-bottom: clamp(1.8rem, 4vw, 2.8rem); }
+.live__head .section__lede { margin-inline: auto; }
+
+/* ---------------------------------------------------------- live status pill */
+.live__meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.7rem 1rem;
+  margin-top: 1.35rem;
+}
+
+.live__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.34rem 0.72rem 0.34rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(110, 231, 168, 0.34);
+  background: rgba(110, 231, 168, 0.08);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.2em;
+  color: var(--ok);
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+/* Cached / offline: the badge must stop claiming to be live. */
+.live__status-text { font-weight: 600; }
+
+.live__status[data-state='cached'] {
+  color: var(--warn);
+  border-color: rgba(255, 212, 121, 0.34);
+  background: rgba(255, 212, 121, 0.08);
+}
+.live__status[data-state='offline'] {
+  color: var(--text-3);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.live__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  position: relative;
+  flex: none;
+}
+.live__dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: livePulse 1.9s var(--ease-io) infinite;
+}
+.live__dot--sm { width: 5px; height: 5px; }
+.live__dot--sm::after { inset: -2.5px; animation-duration: 2.3s; }
+
+/* A paused/hidden tab or a cached response should not look alive. */
+.live__status[data-state='cached'] .live__dot::after,
+.live__status[data-state='offline'] .live__dot::after { animation: none; }
+
+@keyframes livePulse {
+  0%   { transform: scale(0.6); opacity: 0.85; }
+  70%  { transform: scale(2.3); opacity: 0; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+
+.live__updated {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.13em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+.live__sep { color: var(--text-4); }
+.live__cadence { color: var(--text-4); }
+
+/* --------------------------------------------------------- combined total row */
+.live-total {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 1.5rem 1rem 1.6rem;
+  margin: 0 auto clamp(1.3rem, 3vw, 2rem);
+  max-width: 560px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 130% at 50% -30%, rgba(255, 255, 255, 0.08), transparent 62%),
+    var(--surface);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: var(--glow-soft);
+}
+
+.live-total__k {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.22em;
+  color: var(--text-3);
+}
+.live-total__v {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2.4rem, 7vw, 3.6rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 42px rgba(255, 255, 255, 0.32);
+}
+.live-total__sub {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------ the cards */
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.9rem, 2.2vw, 1.5rem);
+}
+
+.dl-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.05rem;
+  padding: clamp(1.15rem, 2.6vw, 1.75rem);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    var(--ink-2);
+  backdrop-filter: blur(20px) saturate(130%);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+  overflow: hidden;
+  transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+
+.dl-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--line-strong);
+  box-shadow: 0 26px 70px -34px rgba(255, 255, 255, 0.35);
+}
+
+/* slow travelling sheen so the card feels alive without being noisy */
+.dl-card__glow {
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.09) 50%, transparent 62%);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+  animation: cardSheen 7s linear infinite;
+}
+.dl-card:hover .dl-card__glow { opacity: 1; }
+
+@keyframes cardSheen {
+  0%   { transform: translateX(-120%); }
+  55%  { transform: translateX(120%); }
+  100% { transform: translateX(120%); }
+}
+
+.dl-card--feature { border-color: rgba(255, 255, 255, 0.14); }
+
+.dl-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.dl-card__ident { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+
+.dl-card__icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.045);
+}
+.dl-card__icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--white);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dl-card__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--white);
+}
+
+.dl-card__file {
+  margin: 0.1rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.dl-card__kind {
+  flex: none;
+  padding: 0.26rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  letter-spacing: 0.16em;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.dl-card__kind--accent { border-color: rgba(110, 231, 168, 0.3); color: var(--ok); }
+
+/* --------------------------------------------------------------- the figures */
+.dl-card__counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  padding: 0.95rem 0 0.2rem;
+  border-top: 1px solid var(--line);
+}
+
+.dl-count { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+
+.dl-count__k {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  letter-spacing: 0.17em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.dl-count__v {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.75rem, 4.4vw, 2.45rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  /* tabular so the number cannot jitter while it animates */
+  font-variant-numeric: tabular-nums;
+  color: var(--white);
+}
+
+.dl-count--accent .dl-count__v { text-shadow: 0 0 30px rgba(110, 231, 168, 0.28); }
+
+/* progress hairline: share of the combined total */
+.dl-card__bar {
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.dl-card__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.45), var(--white));
+  transition: width 0.75s var(--ease);
+}
+.dl-card--feature .dl-card__bar-fill {
+  background: linear-gradient(90deg, rgba(110, 231, 168, 0.5), var(--ok));
+}
+
+.dl-card__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: auto;
+}
+
+.dl-card__size {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.15em;
+  color: var(--text-3);
+}
+
+/* number changers */
+.num-pop { animation: numPop 0.42s var(--ease); }
+@keyframes numPop {
+  0%   { transform: translateY(0) scale(1); }
+  40%  { transform: translateY(-2px) scale(1.045); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.dl-count__v, .live-total__v { display: inline-block; transform-origin: 50% 60%; }
+
+.live__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  max-width: 68ch;
+  margin: clamp(1.4rem, 3vw, 2rem) auto 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: var(--text-3);
+  text-align: left;
+}
+.live__note svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 0.18rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 @media (max-width: 1080px) {
   .nav__links { display: none; }
   .nav__burger { display: block; }
@@ -1049,6 +1411,10 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   .stat:nth-of-type(2) { border-right: 0; }
   .stat__sync { grid-column: span 2; border-top: 1px solid var(--line); text-align: center; }
   .about__facts { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 860px) {
+  .live-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
@@ -1075,6 +1441,15 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   .footer__cols { grid-template-columns: repeat(2, 1fr); }
   .nav__actions .pill { display: none; }
   .nav__actions .btn--sm { display: none; }
+  .live__head { text-align: left; }
+  .live__meta { justify-content: flex-start; }
+  .live__updated { font-size: 0.55rem; letter-spacing: 0.1em; }
+  .live__cadence { display: none; }
+  .live__sep { display: none; }
+  .live-total { padding: 1.2rem 0.9rem 1.3rem; }
+  .dl-card__counts { gap: 0.5rem; }
+  .dl-card__kind { font-size: 0.5rem; padding: 0.22rem 0.45rem; }
+  .live__note { text-align: left; }
   .timeline { padding-left: 1.35rem; }
   .timeline__item .timeline__dot { left: -1.35rem; }
   .timeline__date { margin-left: 0; width: 100%; }
@@ -1097,6 +1472,10 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .live__dot::after { animation: none; }
+  .dl-card__glow { animation: none; opacity: 0; }
+  .dl-card__bar-fill { transition: none; }
+  .num-pop { animation: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important; scroll-behavior: auto !important;

@@ -222,7 +222,7 @@
     </div>
   </div>
 
-  <a href="#downloads" class="hero__scroll" aria-label="Scroll to downloads">
+  <a href="#live-stats" class="hero__scroll" aria-label="Scroll to live download statistics">
     <span>SCROLL</span>
     <span class="hero__scroll-line" aria-hidden="true"></span>
   </a>
@@ -240,6 +240,132 @@
   </div>
 </div>
 
+<!-- ══════════════════════ LIVE DOWNLOAD STATISTICS ══════════════════════ -->
+<section class="section section--live" id="live-stats" aria-labelledby="liveTitle">
+  <div class="container">
+
+    <header class="live__head">
+      <div class="section__eyebrow" data-reveal><span class="index">01</span> LIVE DOWNLOAD STATISTICS</div>
+      <h2 class="section__title" id="liveTitle" data-reveal>Downloaded in <span class="text-gradient">real time</span></h2>
+      <p class="section__lede" data-reveal>
+        Counts are read straight from the official AZYRON CLIENT release on GitHub, so every visitor
+        sees the same numbers. Tracking started at zero when this counter launched &mdash; nothing here
+        is estimated, simulated or padded.
+      </p>
+
+      <div class="live__meta">
+        <span class="live__status" id="liveStatus" data-state="live">
+          <span class="live__dot" aria-hidden="true"></span>
+          <span class="live__status-text" id="liveStatusText">LIVE</span>
+        </span>
+        <span class="live__updated" aria-live="polite">
+          <span id="liveUpdatedText">Connecting to GitHub…</span>
+          <span class="live__sep" aria-hidden="true">·</span>
+          <span class="live__cadence">re-checked every second</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- combined total -->
+    <div class="live-total" data-reveal>
+      <span class="live-total__k">TOTAL DOWNLOADS SINCE LAUNCH</span>
+      <span class="live-total__v" id="liveTotal" aria-live="polite" aria-atomic="true">0</span>
+      <span class="live-total__sub" id="liveTotalSub">JAR 0 &nbsp;+&nbsp; MRPACK 0</span>
+    </div>
+
+    <div class="live-grid" id="liveGrid" aria-busy="true">
+
+      <!-- ───────────── JAR ───────────── -->
+      <article class="dl-card" id="liveCardJar" data-kind="jar" data-reveal>
+        <span class="dl-card__glow" aria-hidden="true"></span>
+        <header class="dl-card__top">
+          <div class="dl-card__ident">
+            <span class="dl-card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v4h4"/><path d="M9 12h6M9 16h4"/></svg>
+            </span>
+            <div>
+              <h3 class="dl-card__title">JAR FILE</h3>
+              <p class="dl-card__file" id="liveJarFile">azyronclient-1.0.0.jar</p>
+            </div>
+          </div>
+          <span class="dl-card__kind">FABRIC MOD</span>
+        </header>
+
+        <div class="dl-card__counts">
+          <div class="dl-count">
+            <span class="dl-count__k">TOTAL DOWNLOADS</span>
+            <span class="dl-count__v" id="liveJarTotal">0</span>
+          </div>
+          <div class="dl-count dl-count--accent">
+            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> SINCE LAUNCH</span>
+            <span class="dl-count__v" id="liveJarLive">0</span>
+          </div>
+        </div>
+
+        <div class="dl-card__bar" aria-hidden="true">
+          <span class="dl-card__bar-fill" id="liveJarBar" style="width:0%"></span>
+        </div>
+
+        <footer class="dl-card__foot">
+          <span class="dl-card__size" id="liveJarSize">—</span>
+          <button class="btn btn--primary btn--block btn--shine" data-live-download="jar" disabled>
+            <span class="btn__label">DOWNLOAD JAR</span>
+            <span class="btn__meta" id="liveJarBtnMeta">v1.0.0</span>
+            <svg class="btn__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 19h16"/></svg>
+          </button>
+        </footer>
+      </article>
+
+      <!-- ───────────── MRPACK ───────────── -->
+      <article class="dl-card dl-card--feature" id="liveCardMrpack" data-kind="mrpack" data-reveal>
+        <span class="dl-card__glow" aria-hidden="true"></span>
+        <header class="dl-card__top">
+          <div class="dl-card__ident">
+            <span class="dl-card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>
+            </span>
+            <div>
+              <h3 class="dl-card__title">MODPACK</h3>
+              <p class="dl-card__file" id="liveMrpackFile">azyron-client-1.0.0.mrpack</p>
+            </div>
+          </div>
+          <span class="dl-card__kind dl-card__kind--accent">.MRPACK</span>
+        </header>
+
+        <div class="dl-card__counts">
+          <div class="dl-count">
+            <span class="dl-count__k">TOTAL DOWNLOADS</span>
+            <span class="dl-count__v" id="liveMrpackTotal">0</span>
+          </div>
+          <div class="dl-count dl-count--accent">
+            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> SINCE LAUNCH</span>
+            <span class="dl-count__v" id="liveMrpackLive">0</span>
+          </div>
+        </div>
+
+        <div class="dl-card__bar" aria-hidden="true">
+          <span class="dl-card__bar-fill" id="liveMrpackBar" style="width:0%"></span>
+        </div>
+
+        <footer class="dl-card__foot">
+          <span class="dl-card__size" id="liveMrpackSize">—</span>
+          <button class="btn btn--primary btn--block btn--shine" data-live-download="mrpack" disabled>
+            <span class="btn__label">DOWNLOAD MODPACK</span>
+            <span class="btn__meta" id="liveMrpackBtnMeta">v1.0.0</span>
+            <svg class="btn__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 19h16"/></svg>
+          </button>
+        </footer>
+      </article>
+    </div>
+
+    <p class="live__note">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/></svg>
+      <span>GitHub credits a download the moment a visitor receives the file, so a new download can take a few
+      seconds to appear. If GitHub is unreachable the cards keep the last confirmed numbers and say so.</span>
+    </p>
+  </div>
+</section>
+
 <!-- ══════════════════════════ DOWNLOADS ══════════════════════════ -->
 <section class="section section--downloads" id="downloads">
   <div class="container">
@@ -249,7 +375,7 @@
       <p class="section__lede" data-reveal>
         Every file below downloads straight from the
         <a href="https://github.com/blazemc125/AzyronClient/releases" target="_blank" rel="noopener noreferrer">official AZYRON CLIENT release</a>
-        on GitHub — no mirrors, no redirects to a web page. Counters refresh automatically every 5&nbsp;seconds.
+        on GitHub — no mirrors, no redirects to a web page. Download figures are re-checked against GitHub every second.
       </p>
     </header>
 
@@ -395,7 +521,7 @@
 <section class="section section--features" id="features">
   <div class="container">
     <header class="section__head section__head--center">
-      <div class="section__eyebrow" data-reveal><span class="index">02</span> FEATURES</div>
+      <div class="section__eyebrow" data-reveal><span class="index">03</span> FEATURES</div>
       <h2 class="section__title" data-reveal>Engineered for <span class="text-gradient">every frame</span></h2>
       <p class="section__lede" data-reveal>
         AZYRON CLIENT is not a texture pack and it is not a settings preset.
@@ -490,7 +616,7 @@
 <section class="section section--changelog" id="changelog">
   <div class="container">
     <header class="section__head">
-      <div class="section__eyebrow" data-reveal><span class="index">03</span> CHANGELOG</div>
+      <div class="section__eyebrow" data-reveal><span class="index">04</span> CHANGELOG</div>
       <h2 class="section__title" data-reveal>Release <span class="text-gradient">history</span></h2>
       <p class="section__lede" data-reveal>Pulled straight from the repository's release feed. No rewritten marketing copy — these are the real notes.</p>
     </header>
@@ -512,7 +638,7 @@
 <section class="section section--about" id="about">
   <div class="container about">
     <div class="about__left">
-      <div class="section__eyebrow" data-reveal><span class="index">04</span> ABOUT</div>
+      <div class="section__eyebrow" data-reveal><span class="index">05</span> ABOUT</div>
       <h2 class="section__title" data-reveal>Built for players who<br /><span class="text-gradient">notice the stutter.</span></h2>
       <p class="about__p" data-reveal>
         AZYRON CLIENT started with a simple frustration: great hardware still felt slow
@@ -578,7 +704,7 @@
 <section class="section section--support" id="support">
   <div class="container">
     <header class="section__head section__head--center">
-      <div class="section__eyebrow" data-reveal><span class="index">05</span> SUPPORT</div>
+      <div class="section__eyebrow" data-reveal><span class="index">06</span> SUPPORT</div>
       <h2 class="section__title" data-reveal>Need a hand? <span class="text-gradient">Read this first.</span></h2>
       <p class="section__lede" data-reveal>The answers that cover almost every question we get. Still stuck? The issue tracker is open.</p>
     </header>

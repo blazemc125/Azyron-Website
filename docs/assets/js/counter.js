@@ -31,7 +31,7 @@
    ACCURACY WINDOW
    ---------------
    GitHub's counter updates within a few seconds of a completed download, and the
-   UI re-reads it every 5 seconds, so a fresh download appears on the next tick.
+   UI re-checks it every second, so a fresh download appears almost immediately.
    While GitHub's response is in flight the UI shows its last confirmed value and
    says "syncing" rather than guessing.
    ============================================================================= */

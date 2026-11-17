@@ -9,6 +9,7 @@
 
 import {
   POLL_MS,
+  pollInterval,
   api,
   getRelease,
   getReleaseHistory,
@@ -16,6 +17,17 @@ import {
   getDiagnostics,
 } from './github-data.js';
 import { loadBaseline, computeSinceLaunch } from './counter.js';
+import {
+  formatCount,
+  parseCount,
+  sharePercent,
+  interpolate,
+  animationDuration,
+  relativeLabel,
+  LIVE_LABELS,
+  pickAssetByKind,
+  buildLiveModel,
+} from './live-stats.js';
 
 /**
  * Version handshake.
@@ -51,6 +63,11 @@ const state = {
   pendingLocal: 0,
   lastUpdatedAt: null,
   pollTimer: null,
+  clockTimer: null,
+  pollIntervalMs: POLL_MS,
+  live: null,
+  pending: { active: false, byAsset: {}, base: {}, expires: 0 },
+  effective: null,
   failures: 0,
   lastTotal: null,
   activeDownload: null,
@@ -331,6 +348,7 @@ function applyRelease(release) {
   const since = computeSinceLaunch(release, state.baseline);
   state.sinceLaunch = since;
   release.sinceLaunch = since;
+  // per-asset cells are written by repaintCounters(), which folds in clicks
   // per-asset "since launch" for the download cards
   release.analytics = {
     sinceByAsset: Object.fromEntries(since.perAsset.map((p) => [String(p.id), p.since])),
@@ -345,10 +363,16 @@ function applyRelease(release) {
   setText($('#heroLatestVersion'), versionLabel);
   setText($('#heroFileCount'), `${release.assets.length} ${release.assets.length === 1 ? 'file' : 'files'}`);
   setText($('#heroLastUpdated'), dateLabel(release.updatedAt || release.publishedAt));
-  setText($('#footerDownloads'), formatNumber(since.total));
 
-  // headline counter
-  setText($('#totalDownloads'), formatNumber(since.total), { pop: since.total !== state.lastTotal });
+  // headline counter — repaintCounters() folds in any unconfirmed clicks and
+  // updates the hero, the stats bar, the split and the live section in one go.
+  repaintCounters();
+  const totalEl = $('#totalDownloads');
+  if (totalEl && since.total !== state.lastTotal) {
+    totalEl.classList.remove('pop');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('pop');
+  }
   const hint = $('#totalDownloadsHint');
   if (hint) {
     if (!since.hasBaseline) {
@@ -356,19 +380,13 @@ function applyRelease(release) {
     } else {
       const bits = [
         since.launchedAt ? `since ${dateLabel(since.launchedAt)}` : 'since launch',
-        'updated every 5s from GitHub',
+        'checked every second against GitHub',
       ];
       hint.innerHTML = `<span>${escapeHtml(bits.join(' · '))}</span>`;
     }
   }
 
-  // JAR / MRPACK split
-  const split = $('#counterSplit');
-  const jarEl = $('#countJar');
-  const mrEl = $('#countMrpack');
-  if (split) split.hidden = !since.hasBaseline || since.total === 0;
-  if (jarEl) setText(jarEl, formatNumber(since.byKind.jar || 0));
-  if (mrEl) setText(mrEl, formatNumber(since.byKind.mrpack || 0));
+  state.lastTotal = since.total;
 
   // hero + cta download meta
   const primary = pickPrimaryAsset(release.assets);
@@ -521,9 +539,8 @@ function renderAssets(release) {
       void dl.offsetWidth;
       dl.classList.add('pop');
     }
-    const sinceCell = card.querySelector('[data-field="since"]');
-    const sinceValue = release.analytics?.sinceByAsset?.[String(asset.id)] || 0;
-    if (sinceCell) sinceCell.textContent = formatNumber(sinceValue);
+    // left to repaintCounters(): it adds any unconfirmed local click on top of
+    // the confirmed per-asset figure, so this cell never flickers down.
   });
 }
 
@@ -551,7 +568,7 @@ function assetCardHtml(asset) {
       </div>
       <div class="asset__meta-item">
         <span class="asset__meta-k">SINCE LAUNCH</span>
-        <span class="asset__meta-v" data-field="since">${formatNumber(sinceValue)}</span>
+        <span class="asset__meta-v" data-field="since" data-kind="${escapeHtml(asset.kind)}">${formatNumber(sinceValue)}</span>
       </div>
     </div>
     <div class="asset__progress" aria-hidden="true"><div class="asset__progress-bar"></div></div>
@@ -567,6 +584,27 @@ function assetCardHtml(asset) {
       </a>
     </div>
   </article>`;
+}
+
+/**
+ * The JAR / MRPACK buttons in the live section use the same download path as
+ * the main asset cards — same verified browser_download_url, same progress
+ * modal, same optimistic feedback. Nothing is duplicated or special-cased.
+ */
+function bindLiveCards() {
+  $$('[data-live-download]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.liveDownload;
+      const asset =
+        state.live?.[kind]?.asset ||
+        pickAssetByKind(state.release?.assets || [], kind);
+      if (!asset) {
+        toast('That file is not in the current release yet.', 'err');
+        return;
+      }
+      startDownload(asset, btn.closest('.dl-card'));
+    });
+  });
 }
 
 function bindAssetCards(grid) {
@@ -884,40 +922,252 @@ function showDownloadError(asset, error, card) {
   setText($('#progressSpeed'), '');
 }
 
+/* ==========================================================================
+   LIVE DOWNLOAD STATISTICS
+   The section under the hero: one card per file kind, a combined total, an
+   honest LIVE badge and counts that animate when they change.
+   ========================================================================== */
+
+const liveAnim = new Map(); // element → requestAnimationFrame handle
+const liveShown = new Map(); // element → last rendered integer
+
+/**
+ * Animate an element from whatever it currently shows to a new value.
+ * Re-entrant: a fresh poll cancels the in-flight animation and continues from
+ * the position on screen, so a 1-second cadence never produces a stutter.
+ */
+function animateCount(el, value, { duration } = {}) {
+  if (!el) return;
+  if (value === null || value === undefined) {
+    const handle = liveAnim.get(el);
+    if (handle) cancelAnimationFrame(handle);
+    liveAnim.delete(el);
+    liveShown.delete(el);
+    el.textContent = '—';
+    return;
+  }
+
+  const target = Math.max(0, Math.round(Number(value) || 0));
+  const from = liveShown.has(el) ? liveShown.get(el) : parseCount(el.textContent);
+  liveShown.set(el, target);
+
+  if (from === target) {
+    el.textContent = formatCount(target);
+    return;
+  }
+
+  // Reduced motion: still update, just without the count-up.
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  if (reduce || document.hidden) {
+    el.textContent = formatCount(target);
+    return;
+  }
+
+  const existing = liveAnim.get(el);
+  if (existing) cancelAnimationFrame(existing);
+
+  const dur = duration ?? animationDuration(from, target);
+  if (dur === 0) {
+    el.textContent = formatCount(target);
+    return;
+  }
+
+  const start = performance.now();
+  const tick = (now) => {
+    const p = Math.min(1, (now - start) / dur);
+    el.textContent = formatCount(interpolate(from, target, p));
+    if (p < 1) {
+      liveAnim.set(el, requestAnimationFrame(tick));
+    } else {
+      liveAnim.delete(el);
+      el.textContent = formatCount(target);
+      // subtle acknowledgement when a new download lands
+      if (target > from) {
+        el.classList.remove('num-pop');
+        void el.offsetWidth;
+        el.classList.add('num-pop');
+      }
+    }
+  };
+  liveAnim.set(el, requestAnimationFrame(tick));
+}
+
+function setBar(el, percent) {
+  if (!el) return;
+  el.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(1)}%`;
+}
+
+/** Render the whole section from one consistent snapshot. */
+function renderLiveStats(model) {
+  state.live = model;
+
+  // combined total + split
+  animateCount($('#liveTotal'), model.total);
+  const totalSub = $('#liveTotalSub');
+  if (totalSub) {
+    totalSub.innerHTML =
+      `JAR ${escapeHtml(formatCount(model.jar.live))} &nbsp;+&nbsp; MRPACK ${escapeHtml(formatCount(model.mrpack.live))}`;
+  }
+
+  // JAR card
+  setText($('#liveJarFile'), model.jar.name);
+  setText($('#liveJarSize'), model.jar.asset ? `${model.jar.sizeLabel} · ${model.versionLabel}` : '—');
+  setText($('#liveJarBtnMeta'), model.versionLabel);
+  animateCount($('#liveJarTotal'), model.jar.total);
+  animateCount($('#liveJarLive'), model.jar.live);
+  setBar($('#liveJarBar'), model.jar.share);
+
+  // MRPACK card
+  setText($('#liveMrpackFile'), model.mrpack.name);
+  setText($('#liveMrpackSize'), model.mrpack.asset ? `${model.mrpack.sizeLabel} · ${model.versionLabel}` : '—');
+  setText($('#liveMrpackBtnMeta'), model.versionLabel);
+  animateCount($('#liveMrpackTotal'), model.mrpack.total);
+  animateCount($('#liveMrpackLive'), model.mrpack.live);
+  setBar($('#liveMrpackBar'), model.mrpack.share);
+
+  // download buttons — enabled only when the asset really exists
+  for (const kind of ['jar', 'mrpack']) {
+    const btn = $(`[data-live-download="${kind}"]`);
+    if (!btn) continue;
+    const asset = model[kind].asset;
+    btn.disabled = !asset;
+    btn.dataset.downloadAsset = asset?.id ?? '';
+    if (asset) {
+      btn.setAttribute('aria-label', `Download ${asset.name}`);
+      btn.title = `Direct download: ${asset.name}`;
+    }
+  }
+
+  const grid = $('#liveGrid');
+  if (grid) grid.setAttribute('aria-busy', 'false');
+
+  // LIVE badge + "updated …" line
+  const status = $('#liveStatus');
+  const statusText = $('#liveStatusText');
+  if (status) status.dataset.state = model.state;
+  if (statusText) setText(statusText, LIVE_LABELS[model.state] || 'LIVE');
+
+  const updated = $('#liveUpdatedText');
+  if (updated) {
+    if (model.state === 'offline') setText(updated, 'GitHub unreachable — numbers unavailable');
+    else if (model.fetchedAt) setText(updated, relativeLabel(model.fetchedAt));
+    else setText(updated, 'waiting for first update');
+  }
+}
+
+/** Re-render only the "updated …" label, once a second, without a network call. */
+function tickLiveClock() {
+  const model = state.live;
+  if (!model || !model.fetchedAt) return;
+  const updated = $('#liveUpdatedText');
+  if (updated) setText(updated, relativeLabel(model.fetchedAt));
+}
+
+
 /* ------------------------------------------- optimistic per-click feedback */
 /**
- * Bump the *local* view only: the headline counter, the JAR/MRPACK split and the
- * card's "since launch" cell each gain one immediately, and the next live read
- * from GitHub overwrites them with the authoritative value. Nothing is written
- * to shared state, so another visitor never sees this.
+ * A click on DOWNLOAD and GitHub's own download counter are a few seconds apart.
+ * Without care that gap produces a number that rises by one and then falls back,
+ * which reads as a bug.
+ *
+ * So a click files a claim: "one more download of <this asset> started, when the
+ * confirmed figure was X". The claim is carried on top of every render until
+ * GitHub's counter for that file has actually moved by as much, then it retires
+ * itself. Nothing is written to shared state — this only decides what the
+ * visitor who clicked sees while the two systems catch up.
+ *
+ * Claims are per-asset, so the JAR card, the MRPACK card and the combined total
+ * always add up to the same number.
  */
 function noteLocalClick(asset) {
   const since = state.sinceLaunch;
   if (!since) return;
-  const kind = String(asset.name || '').toLowerCase().endsWith('.mrpack') ? 'mrpack' : 'jar';
-  state.localPending = Math.min(state.localPending + 1, 9);
 
-  const optimisticTotal = since.total + state.localPending;
-  const optimisticKind = (since.byKind[kind] || 0) + state.localPending;
+  const pending = state.pending;
+  const id = String(asset.id);
 
-  const totalEl = $('#totalDownloads');
-  if (totalEl) {
-    totalEl.textContent = formatNumber(optimisticTotal);
-    totalEl.classList.remove('pop');
-    void totalEl.offsetWidth;
-    totalEl.classList.add('pop');
+  if (!pending.active) {
+    pending.active = true;
+    pending.base = Object.fromEntries(since.perAsset.map((entry) => [String(entry.id), entry.since]));
+    pending.expires = Date.now() + 25_000;
   }
-  const statNum = $('[data-stat="downloads"] .stat__num');
-  if (statNum) statNum.textContent = formatNumber(optimisticTotal);
-  const kindEl = kind === 'mrpack' ? $('#countMrpack') : $('#countJar');
-  if (kindEl) kindEl.textContent = formatNumber(optimisticKind);
-  const cardCell = $(`.asset[data-asset-id="${asset.id}"] [data-field="since"]`);
-  if (cardCell) cardCell.textContent = formatNumber(Number(cardCell.textContent.replace(/[^0-9]/g, '') || 0) + 1);
+  pending.byAsset[id] = (pending.byAsset[id] || 0) + 1;
 
-  // GitHub usually records the download within seconds; re-read soon, then
-  // settle back to the normal 5-second cadence.
-  setTimeout(() => pollStats(true), 4000);
-  setTimeout(() => { state.localPending = 0; }, 20_000);
+  repaintCounters();
+}
+
+/** Fold any unconfirmed clicks into a confirmed snapshot. */
+function withPending(since) {
+  const pending = state.pending;
+  if (!pending.active || !since) return since;
+
+  if (pending.expires < Date.now()) {
+    resetPending();
+    return since;
+  }
+
+  let outstanding = 0;
+  const perAsset = since.perAsset.map((entry) => {
+    const claimed = pending.byAsset[String(entry.id)] || 0;
+    if (!claimed) return entry;
+    // how far GitHub has actually moved for this file since the click
+    const base = pending.base[String(entry.id)] ?? entry.since;
+    const moved = Math.max(0, entry.since - base);
+    const open = Math.max(0, claimed - moved);
+    if (open === 0) return entry;
+    outstanding += open;
+    return { ...entry, since: entry.since + open, pending: open };
+  });
+
+  if (outstanding === 0) {
+    // GitHub has caught up — the claim is real data now, so drop it.
+    resetPending();
+    return since;
+  }
+
+  const byKind = {};
+  for (const entry of perAsset) byKind[entry.kind] = (byKind[entry.kind] || 0) + entry.since;
+
+  return {
+    ...since,
+    perAsset,
+    byKind,
+    total: perAsset.reduce((sum, entry) => sum + entry.since, 0),
+    pending: outstanding,
+  };
+}
+
+function resetPending() {
+  state.pending = { active: false, byAsset: {}, base: {}, expires: 0 };
+}
+
+/**
+ * Repaint every download figure from the confirmed snapshot plus any
+ * unconfirmed local clicks. Single source of truth, so the hero counter, the
+ * stats bar, the per-file cards and the live section can never disagree.
+ */
+function repaintCounters() {
+  const since = withPending(state.sinceLaunch);
+  if (!since) return;
+
+  state.effective = since;
+
+  setText($('#totalDownloads'), formatNumber(since.total));
+  setText($('#footerDownloads'), formatNumber(since.total));
+  setText($('#countJar'), formatNumber(since.byKind.jar || 0));
+  setText($('#countMrpack'), formatNumber(since.byKind.mrpack || 0));
+  const split = $('#counterSplit');
+  if (split) split.hidden = !since.hasBaseline || since.total === 0;
+  const statNum = $('[data-stat="downloads"] .stat__num');
+  if (statNum) statNum.textContent = formatNumber(since.total);
+
+  // per-asset "since launch" cells on the asset cards
+  for (const entry of since.perAsset) {
+    const cell = $(`.asset[data-asset-id="${entry.id}"] [data-field="since"]`);
+    if (cell) cell.textContent = formatNumber(entry.since);
+  }
+
+  if (state.release) renderLiveStats(buildLiveModel(state.release, since));
 }
 
 /* ------------------------------------------------------- version handshake */
@@ -939,7 +1189,6 @@ async function checkVersion() {
 /* ------------------------------------------------------------------ polling */
 async function pollStats(force = false) {
   const release = await getRelease({ force });
-  if (release.ok && !release.stale) state.localPending = 0;
   state.failures = release.stale ? state.failures + 1 : 0;
   state.release = release;
   applyRelease(release);
@@ -948,25 +1197,41 @@ async function pollStats(force = false) {
 
 function schedulePoll() {
   clearTimeout(state.pollTimer);
-  const diag = getDiagnostics();
-  const remaining = diag.rateLimit.remaining;
-  // Poll every 5s while the GitHub budget is healthy; slow down (and let the
-  // local cache answer) as it runs low. This is what keeps the site alive on
-  // shared/NAT'd networks where 60 requests/hour are shared by everyone.
-  const base = state.failures > 0 ? Math.min(POLL_MS * 2, 15_000) : POLL_MS;
-  const throttle = Number.isFinite(remaining) && remaining <= 2 ? 30_000 : base;
+
+  // pollInterval() (github-data.js) decides the cadence from what GitHub is
+  // actually granting us: 1 s while conditional requests return 304 (free),
+  // stepping up to 5 s / 15 s / 60 s as the quota tightens. The live section is
+  // therefore as fast as GitHub allows and never fast enough to get throttled.
+  const wait = pollInterval();
+  state.pollIntervalMs = wait;
+
   state.pollTimer = setTimeout(async () => {
     if (!document.hidden) await pollStats();
     schedulePoll();
-  }, throttle);
+  }, wait);
+}
+
+/**
+ * The visible cadence. Revalidating GitHub every second is only free while it
+ * answers 304; the *label* and the clock, however, can always tick every second
+ * because they are computed locally from the timestamp of the last confirmed
+ * read. That keeps "Updated just now" honest and responsive either way.
+ */
+function initLiveClock() {
+  clearInterval(state.clockTimer);
+  state.clockTimer = setInterval(() => {
+    if (!document.hidden) tickLiveClock();
+  }, 1000);
 }
 
 function initPolling() {
   document.addEventListener('visibilitychange', () => {
+    // Returning to the tab: refresh immediately instead of waiting out the timer.
     if (!document.hidden) pollStats();
   });
   window.addEventListener('online', () => pollStats(true));
   schedulePoll();
+  initLiveClock();
 }
 
 /* --------------------------------------------------------------- changelog */
@@ -1108,6 +1373,7 @@ async function boot() {
   if (document.fonts?.ready) document.fonts.ready.then(() => initMarquee()).catch(() => {});
   window.addEventListener('resize', () => { initMarquee(); });
   initMisc();
+  bindLiveCards();
   initPolling();
 
   // The launch snapshot must be known before the first render, otherwise the

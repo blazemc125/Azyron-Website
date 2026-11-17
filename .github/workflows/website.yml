@@ -91,6 +91,11 @@ jobs:
         shell: bash
         run: node --test scripts/test-counter.mjs
 
+      - name: Test the live statistics section
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: node --test scripts/test-live-stats.mjs
+
       - name: Run site integration tests
         if: steps.filter.outputs.changed == 'true'
         working-directory: azyron-website
