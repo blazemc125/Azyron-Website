@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: azyron-client-website
+    runtime: node
+    plan: free
+    rootDir: azyron-website
+    buildCommand: npm ci
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      - key: CACHE_TTL_MS
+        value: 5000
