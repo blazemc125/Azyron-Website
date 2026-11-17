@@ -10,3 +10,11 @@ app_pojavlauncher/.cxx/
 .vs/
 /curseforge_key.txt
 /app_pojavlauncher/libs/ltw-release.aar
+
+# --- AZYRON website ---------------------------------------------------------
+# docs/ is the published GitHub Pages site: never ignore any part of it.
+!/docs/
+!/docs/**
+node_modules/
+azyron-website/node_modules/
+azyron-website/data/downloads.log

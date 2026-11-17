@@ -1,0 +1,162 @@
+# =============================================================================
+# AZYRON CLIENT website — test + publish to GitHub Pages
+#
+# Live URL: https://blazemc125.github.io/Azyron-Website/
+#
+# How this workflow is built to succeed:
+#   • triggers are NOT filtered by path (a required check must always report),
+#     but each job skips its heavy work when no website file changed;
+#   • `deploy` is a separate job with its own concurrency group, so it can never
+#     deadlock against the CI job;
+#   • `deploy` is gated on the `github-pages` environment, which only allows
+#     deployments from the default branch — the branch Pages serves from;
+#   • the site is plain static HTML/CSS/JS in docs/, so there is no build step
+#     that can fail. The artifact is uploaded straight from docs/.
+# =============================================================================
+
+name: Website
+
+on:
+  push:
+    branches:
+      - v3_openjdk
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref; new pushes supersede in-flight runs of the *same* group.
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test website
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.changed }}
+      modules_ok: ${{ steps.modules.outputs.ok }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect website changes
+        id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse -q --verify HEAD^ >/dev/null; then
+            base="HEAD^"
+          else
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          if git diff --quiet "$base" HEAD -- docs .github/workflows/website.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.filter.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ES module syntax check for every browser script (catches typos without
+      # needing a browser or a bundler).
+      - name: Check JavaScript parses as ES modules
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: |
+          fail=0
+          while IFS= read -r -d '' file; do
+            if ! node --input-type=module --check < "$file"; then
+              echo "::error file=$file::JavaScript syntax error"
+              fail=1
+            else
+              echo "ok: $file"
+            fi
+          done < <(find docs/assets/js -name '*.js' -print0)
+          exit $fail
+
+      - name: Validate static site structure (paths must be relative)
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: node scripts/check-site.mjs
+
+      - name: Run site integration tests
+        if: steps.filter.outputs.changed == 'true'
+        working-directory: azyron-website
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      # Independent of the website: verify every workflow file is valid YAML and
+      # that referenced local scripts exist.
+      - name: Validate CI configuration
+        id: modules
+        if: always()
+        shell: bash
+        run: |
+          pip install --quiet pyyaml
+          python3 - <<'PY'
+          import glob, sys, yaml
+          ok = True
+          for path in glob.glob('.github/workflows/*.yml'):
+              try:
+                  yaml.safe_load(open(path))
+                  print(f'ok: {path}')
+              except Exception as exc:
+                  print(f'::error file={path}::invalid YAML: {exc}')
+                  ok = False
+          sys.exit(0 if ok else 1)
+          PY
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/v3_openjdk'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: website-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+          retention-days: 1
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### AZYRON CLIENT website deployed"
+            echo ""
+            echo "- URL: ${{ steps.deployment.outputs.page_url }}"
+            echo "- Source: \`docs/\` (static, no build step)"
+            echo "- Data: live GitHub Releases API (browser-side, cached)"
+          } >> "$GITHUB_STEP_SUMMARY"

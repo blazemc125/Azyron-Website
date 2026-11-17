@@ -622,6 +622,19 @@ async function startDownload(asset, card) {
     return;
   }
 
+  // Browsers only save types they recognise (or that we tell them to attach).
+  // Custom container types like application/x-modrinth-modpack+zip would open a
+  // "Save as" dialog or render as text, so those go straight to the browser.
+  const SAFE_MIRROR_TYPES = new Set([
+    'application/java-archive',
+    'application/zip',
+    'application/octet-stream',
+    'application/x-zip-compressed',
+    'application/x-java-archive',
+  ]);
+  const declared = String(asset.contentType || '').toLowerCase().split(';')[0].trim();
+  const mirrorable = !declared || SAFE_MIRROR_TYPES.has(declared) || asset.kind === 'jar';
+
   // Count the click immediately: this is a real download attempt started from
   // this site, and it is logged separately from GitHub's own counter.
   const localLog = recordLocalDownload(asset);
@@ -693,6 +706,11 @@ async function startDownload(asset, card) {
     }
   }, 3000);
 
+  if (!mirrorable) {
+    useNativeDownload();
+    return localLog;
+  }
+
   try {
     if (firstByteAt !== 0) return localLog;
     const response = await fetch(url, {
@@ -705,8 +723,12 @@ async function startDownload(asset, card) {
 
     if (!response.ok) throw new Error(`GitHub responded ${response.status}`);
 
-    const type = response.headers.get('content-type') || '';
+    const type = (response.headers.get('content-type') || '').toLowerCase();
     if (type.includes('text/html')) throw new Error('GitHub returned a web page instead of the file');
+    if (type && !SAFE_MIRROR_TYPES.has(type.split(';')[0].trim())) {
+      useNativeDownload();
+      return localLog;
+    }
 
     const length = Number(response.headers.get('content-length')) || total;
     if (Number.isFinite(length) && length > 0) expected = length;
