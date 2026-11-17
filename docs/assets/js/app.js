@@ -928,20 +928,43 @@ function showDownloadError(asset, error, card) {
    honest LIVE badge and counts that animate when they change.
    ========================================================================== */
 
-const liveAnim = new Map(); // element → requestAnimationFrame handle
+const liveAnim = new Map(); // element → { frame, failsafe }
 const liveShown = new Map(); // element → last rendered integer
+
+const prefersReducedMotion = () =>
+  Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
 
 /**
  * Animate an element from whatever it currently shows to a new value.
+ *
+ * Robustness matters more than the animation here: `requestAnimationFrame` does
+ * not run while a tab is in the background, on some embedded browsers, or when
+ * the page is open but not yet painted. If the only path to the target value ran
+ * through rAF, a visitor could be left looking at a permanent 0 while the rest
+ * of the page updated around it. So the animation is a bonus step on top of an
+ * exact, immediate write:
+ *
+ *   1. the new value is committed to the DOM synchronously via a timer sink;
+ *   2. rAF frames only make it look smoother while they are actually running;
+ *   3. a timeout guarantees the final value lands even if no frame ever fires.
+ *
  * Re-entrant: a fresh poll cancels the in-flight animation and continues from
  * the position on screen, so a 1-second cadence never produces a stutter.
  */
 function animateCount(el, value, { duration } = {}) {
   if (!el) return;
-  if (value === null || value === undefined) {
-    const handle = liveAnim.get(el);
-    if (handle) cancelAnimationFrame(handle);
+
+  const clear = () => {
+    const handles = liveAnim.get(el);
+    if (handles) {
+      if (handles.frame) cancelAnimationFrame(handles.frame);
+      if (handles.failsafe) clearTimeout(handles.failsafe);
+    }
     liveAnim.delete(el);
+  };
+
+  if (value === null || value === undefined) {
+    clear();
     liveShown.delete(el);
     el.textContent = '—';
     return;
@@ -951,45 +974,54 @@ function animateCount(el, value, { duration } = {}) {
   const from = liveShown.has(el) ? liveShown.get(el) : parseCount(el.textContent);
   liveShown.set(el, target);
 
+  const settle = () => {
+    clear();
+    el.textContent = formatCount(target);
+  };
+
   if (from === target) {
-    el.textContent = formatCount(target);
+    settle();
     return;
   }
 
-  // Reduced motion: still update, just without the count-up.
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  if (reduce || document.hidden) {
-    el.textContent = formatCount(target);
+  // Reduced motion or a hidden tab: no count-up, just the correct number.
+  if (prefersReducedMotion() || document.hidden) {
+    settle();
     return;
   }
-
-  const existing = liveAnim.get(el);
-  if (existing) cancelAnimationFrame(existing);
 
   const dur = duration ?? animationDuration(from, target);
   if (dur === 0) {
-    el.textContent = formatCount(target);
+    settle();
     return;
   }
+
+  clear();
+
+  const handles = { frame: 0, failsafe: 0 };
+  // Guarantee the target value lands even when no animation frame ever runs.
+  handles.failsafe = setTimeout(settle, dur + 400);
+  liveAnim.set(el, handles);
 
   const start = performance.now();
   const tick = (now) => {
     const p = Math.min(1, (now - start) / dur);
     el.textContent = formatCount(interpolate(from, target, p));
     if (p < 1) {
-      liveAnim.set(el, requestAnimationFrame(tick));
+      handles.frame = requestAnimationFrame(tick);
     } else {
-      liveAnim.delete(el);
-      el.textContent = formatCount(target);
+      const landedFrom = from;
+      settle();
       // subtle acknowledgement when a new download lands
-      if (target > from) {
+      if (target > landedFrom) {
         el.classList.remove('num-pop');
         void el.offsetWidth;
         el.classList.add('num-pop');
       }
     }
   };
-  liveAnim.set(el, requestAnimationFrame(tick));
+
+  handles.frame = requestAnimationFrame(tick);
 }
 
 function setBar(el, percent) {

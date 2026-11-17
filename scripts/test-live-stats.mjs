@@ -216,6 +216,25 @@ test('offline and stale payloads are labelled honestly', () => {
   assert.equal(old.state, 'cached', 'a read older than the ceiling is not live');
 });
 
+test('counters land on the real value even if requestAnimationFrame never runs', async () => {
+  // Regression: the first version of animateCount only wrote the target value
+  // from inside a rAF callback. In a background or not-yet-painted tab no frame
+  // ever fires, so the cards stayed on 0 while everything else updated — the
+  // exact symptom seen on the deployed site. app.js must commit the value
+  // through a timer as well.
+  const { readFile } = await import('node:fs/promises');
+  const app = await readFile(new URL('../docs/assets/js/app.js', import.meta.url), 'utf8');
+
+  const fn = app.slice(app.indexOf('function animateCount'));
+  const body = fn.slice(0, fn.indexOf('function setBar'));
+
+  assert.match(body, /setTimeout\(/, 'needs a timer fallback, not only rAF');
+  assert.match(body, /settle\(\)/, 'must have a single settle path that writes the target');
+  // the failsafe must be long enough for a real animation but short enough that
+  // a visitor never sees a stale 0 for a whole poll cycle
+  assert.match(body, /dur \+ 400/);
+});
+
 test('the section contains no fabricated numbers', async () => {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../docs/assets/js/live-stats.js', import.meta.url), 'utf8');
