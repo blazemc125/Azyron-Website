@@ -96,6 +96,11 @@ jobs:
         shell: bash
         run: node --test scripts/test-live-stats.mjs
 
+      - name: Test the download event store
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: node --test scripts/test-event-store.mjs
+
       - name: Run site integration tests
         if: steps.filter.outputs.changed == 'true'
         working-directory: azyron-website

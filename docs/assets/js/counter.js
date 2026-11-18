@@ -39,6 +39,45 @@
 /** Where the launch snapshot lives. Fetched from the same origin. */
 export const BASELINE_URL = './data/counter-baseline.json';
 
+/**
+ * Combine first-party download events with GitHub's own record.
+ *
+ * Two sources, and the rule between them is simple: never double count.
+ *
+ *   • `events` are real download events recorded by a first-party counter. When
+ *     any exist they are the authoritative "since launch" figure, because they
+ *     start at zero by construction.
+ *   • Otherwise the figure is GitHub's shared `download_count` minus the launch
+ *     baseline — downloads GitHub recorded after the counter went live.
+ *
+ * Both are shared by every visitor (they live on a server, not in this tab) and
+ * neither is ever synthesised.
+ */
+export function mergeSources(githubSince, eventSummary) {
+  const eventsTotal = Number(eventSummary?.total) || 0;
+  const eventsByKind = eventSummary?.byKind || null;
+  const eventsAuthoritative = eventsTotal > 0 && eventsByKind;
+
+  if (!eventsAuthoritative) {
+    return githubSince ? { ...githubSince, source: 'github' } : githubSince;
+  }
+
+  const byKind = {
+    ...(githubSince?.byKind || {}),
+    jar: eventsByKind.jar || 0,
+    mrpack: eventsByKind.mrpack || 0,
+  };
+
+  return {
+    ...githubSince,
+    byKind,
+    total: byKind.jar + byKind.mrpack,
+    source: 'events',
+    hasBaseline: true,
+    eventsTotal,
+  };
+}
+
 /** Extra headroom so a baseline that is *ahead* of GitHub can never show a
  *  negative number (only possible if GitHub itself reports a lower value). */
 const clamp = (n) => (Number.isFinite(n) && n > 0 ? n : 0);

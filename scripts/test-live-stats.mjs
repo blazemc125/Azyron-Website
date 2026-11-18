@@ -248,3 +248,47 @@ test('the section contains no fabricated numbers', async () => {
   assert.match(source, /sinceLaunch\?\.perAsset/);
   assert.match(source, /asset\.downloads|jar\?\.downloads/);
 });
+
+/* ------------------------------------------ the 1-second live system contract */
+
+test('the scheduler polls on a fixed 1-second cadence, not 1s + latency', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const app = await readFile(new URL('../docs/assets/js/app.js', import.meta.url), 'utf8');
+
+  // Anchored-to-deadline scheduling: sleeping `interval` AFTER each cycle makes
+  // the real period interval + latency (1s advertised, ~1.3s delivered).
+  assert.match(app, /nextTickAt/, 'must anchor ticks to a wall-clock deadline');
+  assert.match(app, /state\.nextTickAt \+= interval/);
+  assert.match(app, /Math\.max\(0, state\.nextTickAt - state\.nextTickAt|Math\.max\(0, state\.nextTickAt - now\)/);
+});
+
+test('a failed cycle can never stop the live system', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const app = await readFile(new URL('../docs/assets/js/app.js', import.meta.url), 'utf8');
+
+  // Without try/finally, one throw inside the render path silently kills polling
+  // and the page sits on stale numbers while still claiming to be live.
+  const block = app.slice(app.indexOf('state.pollTimer = setTimeout'));
+  assert.match(block.slice(0, 700), /try \{/);
+  assert.match(block.slice(0, 700), /finally \{/, 'schedulePoll() must run even when a cycle throws');
+});
+
+test('a repeated 1-second repaint must not do layout work when nothing changed', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const app = await readFile(new URL('../docs/assets/js/app.js', import.meta.url), 'utf8');
+
+  // Rebuilding innerHTML and re-setting identical inline styles every second was
+  // ~400 ms of layout work per cycle, which stretched the cadence past 2 s.
+  assert.match(app, /paintedSignature/, 'needs change detection before repainting');
+  assert.match(app, /if \(totalSub\.innerHTML !== html\)/);
+  assert.match(app, /if \(el\.style\.width === value\) return;/);
+});
+
+test('the refresh does not depend on a fresh cache (a stale cache used to skip the fetch)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const data = await readFile(new URL('../docs/assets/js/github-data.js', import.meta.url), 'utf8');
+
+  // The old short-circuit returned cached JSON for CACHE_TTL_MS, so a "1 second"
+  // refresh was really one fetch per cached TTL. Counters change every second.
+  assert.doesNotMatch(data, /if \(!force && cached\?\.data && now - \(cached\.at \|\| 0\) < \(cached\.ttl/);
+});

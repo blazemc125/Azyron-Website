@@ -1140,6 +1140,31 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   text-transform: uppercase;
 }
 .live__sep { color: var(--text-4); }
+
+/* A small sweeping bar that completes once per refresh: visible proof that the
+   1-second poll is actually running, rather than a claim in the copy. */
+.live__tick {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.live__tick-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(110, 231, 168, 0.55), var(--ok));
+  transition: width 0.12s linear;
+}
+.live__status[data-state='cached'] ~ .live__updated .live__tick-fill,
+.live__status[data-state='offline'] ~ .live__updated .live__tick-fill {
+  background: linear-gradient(90deg, rgba(255, 212, 121, 0.5), var(--warn));
+}
 .live__cadence { color: var(--text-4); }
 
 /* --------------------------------------------------------- combined total row */
@@ -1445,6 +1470,7 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
   .live__meta { justify-content: flex-start; }
   .live__updated { font-size: 0.55rem; letter-spacing: 0.1em; }
   .live__cadence { display: none; }
+  .live__tick { width: 26px; }
   .live__sep { display: none; }
   .live-total { padding: 1.2rem 0.9rem 1.3rem; }
   .dl-card__counts { gap: 0.5rem; }
@@ -1472,6 +1498,7 @@ html { scrollbar-color: rgba(255,255,255,0.22) #000; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .live__tick-fill { transition: none; }
   .live__dot::after { animation: none; }
   .dl-card__glow { animation: none; opacity: 0; }
   .dl-card__bar-fill { transition: none; }

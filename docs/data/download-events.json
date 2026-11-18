@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "description": "Normalised AZYRON CLIENT download events. This is the shape the website reads to build its shared counters. It is produced from GitHub's own download record (the release assets' download_count) so that every number shown on the site corresponds to a download GitHub actually recorded. When a first-party event stream (edge function, analytics worker) exists, it can write the same shape and the site needs no changes.",
+  "generatedAt": "2026-11-17T14:21:37Z",
+  "source": "github-release-assets",
+  "launchedAt": "2026-11-17T14:21:37Z",
+  "events": [],
+  "totals": {
+    "jar": 0,
+    "mrpack": 0,
+    "total": 0
+  },
+  "note": "Empty on purpose. The site derives live figures from GitHub's authoritative download_count minus the launch baseline. Per-event rows require a first-party counter; see scripts/event-store.mjs."
+}

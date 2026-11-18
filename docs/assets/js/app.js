@@ -16,7 +16,8 @@ import {
   getLocalDownloads,
   getDiagnostics,
 } from './github-data.js';
-import { loadBaseline, computeSinceLaunch } from './counter.js';
+import { loadBaseline, computeSinceLaunch, mergeSources } from './counter.js';
+import { loadEvents, summariseEvents } from './event-store.js';
 import {
   formatCount,
   parseCount,
@@ -65,7 +66,11 @@ const state = {
   pollTimer: null,
   clockTimer: null,
   pollIntervalMs: POLL_MS,
+  lastFetchAt: 0,
+  nextTickAt: 0,
+  paintedSignature: '',
   live: null,
+  events: [],
   pending: { active: false, byAsset: {}, base: {}, expires: 0 },
   effective: null,
   failures: 0,
@@ -345,7 +350,11 @@ function applyRelease(release) {
   // "Downloads Since Launch" — the only download figure shown as a headline.
   // Derived from GitHub's live counters minus the snapshot taken at launch,
   // so it starts at 0 and only ever moves when a real download happens.
-  const since = computeSinceLaunch(release, state.baseline);
+  const githubSince = computeSinceLaunch(release, state.baseline);
+  const since = mergeSources(
+    githubSince,
+    summariseEvents(state.events || [], { since: state.baseline?.launchedAt }),
+  );
   state.sinceLaunch = since;
   release.sinceLaunch = since;
   // per-asset cells are written by repaintCounters(), which folds in clicks
@@ -1026,7 +1035,9 @@ function animateCount(el, value, { duration } = {}) {
 
 function setBar(el, percent) {
   if (!el) return;
-  el.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(1)}%`;
+  const value = `${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(1)}%`;
+  if (el.style.width === value) return; // layout work only when the figure moves
+  el.style.width = value;
 }
 
 /** Render the whole section from one consistent snapshot. */
@@ -1037,8 +1048,9 @@ function renderLiveStats(model) {
   animateCount($('#liveTotal'), model.total);
   const totalSub = $('#liveTotalSub');
   if (totalSub) {
-    totalSub.innerHTML =
+    const html =
       `JAR ${escapeHtml(formatCount(model.jar.live))} &nbsp;+&nbsp; MRPACK ${escapeHtml(formatCount(model.mrpack.live))}`;
+    if (totalSub.innerHTML !== html) totalSub.innerHTML = html;
   }
 
   // JAR card
@@ -1093,6 +1105,38 @@ function tickLiveClock() {
   if (!model || !model.fetchedAt) return;
   const updated = $('#liveUpdatedText');
   if (updated) setText(updated, relativeLabel(model.fetchedAt));
+}
+
+/**
+ * The sweep bar under the LIVE badge.
+ *
+ * It advances with the real clock towards the next scheduled poll and snaps back
+ * to 0 the moment a fetch actually completes, so what it shows is the fetch
+ * cadence itself — not a decorative loop. If the cadence slows down because the
+ * API budget is under pressure, the bar visibly slows with it and #liveCadence
+ * updates to the real number of seconds.
+ */
+function renderCadence() {
+  const seconds = Math.max(1, Math.round((state.pollIntervalMs || POLL_MS) / 1000));
+  setText($('#liveCadence'), String(seconds));
+
+  const fill = $('#liveTickFill');
+  if (!fill) return;
+
+  const last = state.lastFetchAt || 0;
+  if (!last) {
+    fill.style.width = '0%';
+    return;
+  }
+  const elapsed = Date.now() - last;
+  const pct = Math.max(0, Math.min(100, (elapsed / (state.pollIntervalMs || POLL_MS)) * 100));
+  fill.style.width = `${pct.toFixed(0)}%`;
+}
+
+/** Called as soon as a poll completes, so the bar restarts from zero. */
+function markFetchComplete() {
+  state.lastFetchAt = Date.now();
+  renderCadence();
 }
 
 
@@ -1184,6 +1228,20 @@ function repaintCounters() {
 
   state.effective = since;
 
+  // Cheap change detection. This runs once a second, so it must not do layout
+  // work when nothing moved: an identical snapshot is a no-op.
+  const signature = [
+    since.total,
+    since.byKind.jar || 0,
+    since.byKind.mrpack || 0,
+    since.hasBaseline ? 1 : 0,
+    since.perAsset.map((p) => p.since).join(','),
+    state.release?.tag || '',
+    state.release?.stale ? 1 : 0,
+  ].join('|');
+  if (signature === state.paintedSignature && state.live) return;
+  state.paintedSignature = signature;
+
   setText($('#totalDownloads'), formatNumber(since.total));
   setText($('#footerDownloads'), formatNumber(since.total));
   setText($('#countJar'), formatNumber(since.byKind.jar || 0));
@@ -1220,26 +1278,57 @@ async function checkVersion() {
 
 /* ------------------------------------------------------------------ polling */
 async function pollStats(force = false) {
-  const release = await getRelease({ force });
+  // Both sources are read every cycle, in parallel, so the 1-second refresh
+  // covers first-party events and GitHub's own record alike.
+  const [release, eventStore] = await Promise.all([
+    getRelease({ force }),
+    loadEvents().catch(() => ({ ok: false, events: [] })),
+  ]);
+  state.events = eventStore.events || [];
   state.failures = release.stale ? state.failures + 1 : 0;
   state.release = release;
   applyRelease(release);
+  markFetchComplete();
   return release;
 }
 
 function schedulePoll() {
   clearTimeout(state.pollTimer);
 
-  // pollInterval() (github-data.js) decides the cadence from what GitHub is
-  // actually granting us: 1 s while conditional requests return 304 (free),
-  // stepping up to 5 s / 15 s / 60 s as the quota tightens. The live section is
-  // therefore as fast as GitHub allows and never fast enough to get throttled.
-  const wait = pollInterval();
-  state.pollIntervalMs = wait;
+  // pollInterval() (github-data.js) decides the cadence: 1 s by default, longer
+  // only when the shared API budget is genuinely at risk.
+  const interval = pollInterval();
+  state.pollIntervalMs = interval;
 
+  // Fixed-cadence scheduling. Sleeping `interval` *after* each request finishes
+  // would make the real period (interval + latency) — at 300 ms of latency that
+  // is a 1.3 s refresh advertised as 1 s. Instead every tick is anchored to a
+  // wall-clock deadline, so the period stays 1 s and slow cycles simply eat into
+  // the idle time. Concurrent fetches are joined by `inFlight`, so a cycle that
+  // overruns its slot can never pile up requests.
+  const now = Date.now();
+  if (!state.nextTickAt || now - state.nextTickAt > interval * 4) {
+    // first tick, or we have fallen far behind (tab was hidden) → no catch-up storm
+    state.nextTickAt = now + interval;
+  } else {
+    state.nextTickAt += interval;
+    if (state.nextTickAt < now) state.nextTickAt = now + interval;
+  }
+
+  const wait = Math.max(0, state.nextTickAt - now);
   state.pollTimer = setTimeout(async () => {
-    if (!document.hidden) await pollStats();
-    schedulePoll();
+    // A single failed cycle must never stop the live system. Without this guard
+    // one throw anywhere in the render path would leave the page frozen on old
+    // numbers while still claiming to be live — the worst possible outcome for a
+    // counter whose whole job is being current.
+    try {
+      if (!document.hidden) await pollStats();
+    } catch (error) {
+      state.failures += 1;
+      console.warn('[azyron] poll cycle failed, retrying on the next tick:', error);
+    } finally {
+      schedulePoll();
+    }
   }, wait);
 }
 
@@ -1252,14 +1341,21 @@ function schedulePoll() {
 function initLiveClock() {
   clearInterval(state.clockTimer);
   state.clockTimer = setInterval(() => {
-    if (!document.hidden) tickLiveClock();
+    if (document.hidden) return;
+    tickLiveClock();
+    renderCadence();
   }, 1000);
 }
 
 function initPolling() {
   document.addEventListener('visibilitychange', () => {
-    // Returning to the tab: refresh immediately instead of waiting out the timer.
-    if (!document.hidden) pollStats();
+    // Returning to the tab: fetch now, then let the scheduler rebuild its anchor
+    // so a long hidden period does not trigger a burst of catch-up requests.
+    if (!document.hidden) {
+      state.nextTickAt = 0;
+      pollStats();
+      schedulePoll();
+    }
   });
   window.addEventListener('online', () => pollStats(true));
   schedulePoll();

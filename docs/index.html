@@ -261,7 +261,10 @@
         <span class="live__updated" aria-live="polite">
           <span id="liveUpdatedText">Connecting to GitHub…</span>
           <span class="live__sep" aria-hidden="true">·</span>
-          <span class="live__cadence">re-checked every second</span>
+          <span class="live__cadence">refreshing every <b id="liveCadence">1</b>s</span>
+          <span class="live__tick" id="liveTick" aria-hidden="true">
+            <span class="live__tick-fill" id="liveTickFill"></span>
+          </span>
         </span>
       </div>
     </header>
@@ -375,7 +378,7 @@
       <p class="section__lede" data-reveal>
         Every file below downloads straight from the
         <a href="https://github.com/blazemc125/AzyronClient/releases" target="_blank" rel="noopener noreferrer">official AZYRON CLIENT release</a>
-        on GitHub — no mirrors, no redirects to a web page. Download figures are re-checked against GitHub every second.
+        on GitHub — no mirrors, no redirects to a web page. Download figures refresh every <strong>1 second</strong> &mdash; each tick revalidates against GitHub, and a conditional response costs no API quota, so the cadence stays at one second for every visitor.
       </p>
     </header>
 

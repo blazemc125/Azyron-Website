@@ -142,6 +142,25 @@ Tests: `node --test scripts/test-counter.mjs` (12 tests, run in CI) cover the ze
 independent JAR/MRPACK counting, the never-negative guarantee, and new assets published
 after launch.
 
+### Download events (the shared backend contract)
+
+`docs/assets/js/event-store.js` defines the shape shared download events must take, and
+counts them if any are present. Today the file behind it
+([`docs/data/download-events.json`](../docs/data/download-events.json)) is deliberately
+empty, because GitHub Pages cannot accept writes.
+
+**Why per-event rows need a real backend.** A static host cannot record "someone clicked
+download at 12:00:03", and writing that from the browser would make it forgeable — anyone
+could fabricate downloads with the developer console, which is exactly the fake-number
+problem this project refuses to have. So the authoritative, shared, unforgeable record is
+GitHub's own `download_count`, which increments when a file is really served from release
+storage.
+
+When a first-party counter exists, point an edge function (Cloudflare Worker, Vercel, Deno
+Deploy) at the same JSON shape, serve it with CORS, and the site switches to events
+automatically — `mergeSources()` prefers events the moment any real ones exist, and never
+adds them to GitHub's figures. Tests: `node --test scripts/test-event-store.mjs` (17).
+
 ### Resetting the counter to zero
 
 ```bash
@@ -175,17 +194,37 @@ own download button, plus a combined total above them.
 
 **How can it refresh every second without burning the 60/hour quota?** Conditional
 requests. Once `github-data.js` holds an ETag, a revalidation that GitHub answers with
-**304 Not Modified** does not count against the rate limit at all. `pollInterval()` reads
-what GitHub is actually granting:
+**304 Not Modified** does not count against the rate limit at all. Measured against the
+real endpoint: six conditional requests in six seconds left `x-ratelimit-remaining`
+completely unchanged. So the honest cost of a 1-second refresh is one request per second
+on the wire and **zero quota** while the release is unchanged.
 
-| GitHub's response | Interval |
+The refresh is genuinely every second — three things had to be fixed to make that true:
+
+1. **No cache short-circuit.** `getRelease()` used to return cached JSON for its TTL, so
+   a "1 s" refresh was really one fetch per TTL. Download counters change every second,
+   so a cache hit is only valid as a display fallback, never as a reason to skip the
+   network.
+2. **Fixed-cadence scheduling.** Sleeping 1 s *after* each request makes the real period
+   `1 s + latency` (≈1.3 s delivered while advertising 1 s). Ticks are now anchored to a
+   wall-clock deadline, so the period stays 1 s and a slow cycle eats into idle time.
+   Concurrent fetches are joined by a single-flight guard, so an overrun can never pile
+   up requests.
+3. **No layout thrash.** Rebuilding `innerHTML` and re-writing identical inline styles
+   every second cost ~400 ms per cycle. Repaints are now skipped entirely when the
+   snapshot is unchanged.
+
+| Condition | Interval |
 |---|---|
-| 304 (not modified) | **1 s** — the requested cadence, free |
-| 200, first change | 5 s |
-| 200, repeated changes | 10 s → 20 s |
+| normal operation | **1 s** |
+| repeated failures | 2 s → 4 s → … capped at 30 s |
 | quota ≤ 8 remaining | 15 s |
 | quota ≤ 2 remaining | 60 s |
 | 403 / 429 | waits out the reset window |
+
+A failed cycle can never stop the system: the tick is wrapped in `try/finally`, so the
+schedule always continues and the badge reports `OFFLINE`/`CACHED` honestly until a read
+succeeds again.
 
 The numbers themselves cannot change between GitHub reads, so this is as fast as the
 data allows. Separately, the *"Updated …"* label and the LIVE badge tick locally once a
@@ -202,7 +241,7 @@ always add up.
 in this poll; `cached` for stale data or a read older than 20 s; `offline` when GitHub is
 unreachable. It is never allowed to say LIVE while the numbers are not.
 
-Tests: `node --test scripts/test-live-stats.mjs` (17 tests, run in CI) cover formatting,
+Tests: `node --test scripts/test-live-stats.mjs` (21 tests, run in CI) cover formatting,
 the animation maths, the "just now" label, the LIVE badge states, asset picking, and an
 assertion that the module contains no `Math.random` and no hard-coded download totals.
 
