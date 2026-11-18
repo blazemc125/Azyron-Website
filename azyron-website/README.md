@@ -139,6 +139,31 @@ Tests: `node --test scripts/test-counter.mjs` (12 tests, run in CI) cover the ze
 independent JAR/MRPACK counting, the never-negative guarantee, and new assets published
 after launch.
 
+### Resetting the counter to zero
+
+```bash
+node scripts/reset-baseline.mjs --dry-run   # show the snapshot it would take
+node scripts/reset-baseline.mjs             # write it, commit, push
+```
+
+The script reads the current `download_count` for every asset from the GitHub API
+and writes them to [`docs/data/counter-baseline.json`](../docs/data/counter-baseline.json)
+with a fresh `launchedAt`. Because the site shows `live − baseline`, the public
+figure drops back to **0** and starts tracking again from that moment.
+
+Two safety rails: it refuses to write when **the release has no assets**, and it
+refuses to move the baseline **backwards** (GitHub reporting fewer downloads than
+the stored snapshot) unless `--allow-backwards` is passed, since that would make
+the site count downloads that had already happened.
+
+**What a reset cannot do:** it does not touch GitHub's all-time download counters.
+Those live on GitHub's servers and are the only real record of a download — the
+site merely chooses the point at which it starts counting. Nothing on GitHub Pages
+can alter them, and no honest counter could.
+
+The counter tests read the shipped baseline and derive their expectations from it,
+so a reset never desyncs the suite — it only moves the numbers it tests against.
+
 ### The live statistics section
 
 Directly under the hero, `#live-stats` shows two cards — **JAR FILE** and
@@ -174,7 +199,7 @@ always add up.
 in this poll; `cached` for stale data or a read older than 20 s; `offline` when GitHub is
 unreachable. It is never allowed to say LIVE while the numbers are not.
 
-Tests: `node --test scripts/test-live-stats.mjs` (16 tests, run in CI) cover formatting,
+Tests: `node --test scripts/test-live-stats.mjs` (17 tests, run in CI) cover formatting,
 the animation maths, the "just now" label, the LIVE badge states, asset picking, and an
 assertion that the module contains no `Math.random` and no hard-coded download totals.
 
