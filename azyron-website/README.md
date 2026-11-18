@@ -267,6 +267,83 @@ Cloudflare Worker in front (30 lines) or use the bundled Express server.
 
 ---
 
+## Unique visitors and live active visitors
+
+The homepage shows **two different numbers**, deliberately kept apart:
+
+| Number | Meaning | Behaviour |
+| --- | --- | --- |
+| **TOTAL UNIQUE VISITORS** | distinct browsers/players that have ever opened the site | lifetime, only ever goes up |
+| **LIVE ACTIVE VISITORS** | distinct visitors seen in the last **30 seconds** | rises and falls, decays to `0` |
+
+They read from the small Express service in this folder — **not** from a static file and not
+from `localStorage`, because GitHub Pages is read-only and every visitor would otherwise see
+only their own count. That service is the only writable part of the system, and it is what makes
+the total identical for everybody.
+
+### How double counting is prevented
+
+1. **Stable visitor id.** `crypto.randomUUID()` (32 hex chars) is minted once and kept in
+   `localStorage['azyron:vid']`. Refresh, back-button, or 100 visits = still one visitor.
+2. **One heartbeat per browser.** Tabs elect a leader through `BroadcastChannel` plus a
+   `localStorage` lease, so ten open tabs send one heartbeat, not ten.
+3. **The server is idempotent anyway.** Uniques are keyed by visitor id, so a duplicated
+   heartbeat cannot inflate the total — the leader election is an optimisation, not the guarantee.
+4. **Cleared storage is not a new visitor.** When a tab has no id it sends `fresh: true`, and the
+   API folds it back onto the existing record using a *salted* hash of IP + User-Agent.
+   `fresh` is required on purpose: without it, two real players behind one NAT on the same browser
+   build would be wrongly merged, which is an undercount of real humans.
+5. **Junk ids are rejected** (`400`), so a script cannot pad the number with `1`, `2`, `3`…
+6. **No invented numbers, anywhere.** If the API cannot be reached the panel shows
+   `RECONNECTING`, and if no API is configured it shows `UNAVAILABLE — visitor tracking backend
+   not deployed`. It never falls back to a plausible-looking figure.
+
+Active visitors need no delete job: "active" is simply the set of records whose last heartbeat is
+inside the 30 s window, so a player who closes the tab drops out of the number by itself.
+
+### Turning it on (one-time, ~3 minutes)
+
+The Pages site is static, so it needs the API deployed somewhere that can write. A free Render
+web service is already configured in [`render.yaml`](./render.yaml):
+
+1. On [render.com](https://render.com) choose **New → Blueprint** and pick this repository.
+   Render reads `render.yaml` and creates `azyron-client-website` (`rootDir: azyron-website`,
+   `startCommand: node server.js`, health check `/api/health`).
+2. Add the environment variables (Render → service → Environment):
+   * `VISITOR_SALT` — any long random string (e.g. `openssl rand -hex 32`);
+   * `ALLOWED_ORIGINS` — `https://blazemc125.github.io` (comma-separate more if needed).
+3. Copy the service URL, e.g. `https://azyron-client-website.onrender.com`, and set it in
+   [`docs/index.html`](../docs/index.html):
+
+   ```html
+   <meta name="azyron:api" content="https://azyron-client-website.onrender.com" />
+   ```
+
+   Commit and push; the deploy workflow republishes Pages. The panel flips from `UNAVAILABLE`
+   to `LIVE` on the next load and starts counting from `0` — no historical numbers are seeded.
+
+Without step 3 the panel stays in its honest `UNAVAILABLE` state. Nothing else on the site is
+affected.
+
+> **Persistence note:** the store is an append-only JSON-lines file (`data/visitors.log`) replayed
+> into memory on boot, compacted to one row per visitor every 15 minutes. On a Render **free**
+> instance the disk is ephemeral, so a redeploy starts the count again; attach a persistent disk
+> (paid) and point `VISITORS_FILE` at it if the total must survive redeploys. Deploying the Express
+> app at the root also serves the site itself from the same origin, which removes the CORS hop.
+
+### API
+
+| Route | Description |
+| --- | --- |
+| `GET /api/visits` | `{ unique, active, windowMs, fetchedAt }` — polled once per second |
+| `POST /api/visits` | heartbeat `{ visitorId, fresh? }` → `{ unique, active, isNew, you, expiresAt }` |
+| `GET /api/visits/health` | storage kind, active window, current totals |
+
+`POST /api/visits` is the only route that writes, accepts at most 2 KB of JSON, and sets CORS
+headers **only** for origins listed in `ALLOWED_ORIGINS` (never `*`).
+
+---
+
 ## Optional: the bundled server (caching proxy)
 
 `azyron-website/` contains an **optional** Node/Express server that serves the same `docs/`
@@ -276,7 +353,7 @@ you outgrow the static limits or want to host elsewhere.
 ```bash
 cd azyron-website
 npm install
-npm test        # 9 integration tests against a mock GitHub upstream
+npm test        # 31 tests: mock-GitHub integration + visitor store guarantees
 npm start       # http://localhost:3000
 ```
 
@@ -290,6 +367,8 @@ npm start       # http://localhost:3000
 | `GET /api/releases` | Release history for the Changelog |
 | `GET /api/download/:assetId` | Streams the real asset (Range supported) |
 | `GET /api/health` | Uptime, cache state, GitHub rate-limit info |
+| `GET/POST /api/visits` | Shared unique + live active visitors (see above) |
+| `GET /api/visits/health` | Visitor store status |
 
 Configuration lives in [`.env.example`](../azyron-website/.env.example).
 </details>

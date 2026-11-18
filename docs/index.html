@@ -11,6 +11,11 @@
 <link rel="apple-touch-icon" href="./favicon.svg" />
 <link rel="manifest" href="./site.webmanifest" />
 <link rel="canonical" href="https://blazemc125.github.io/Azyron-Website/" />
+<!-- Visitor service (the Express app in azyron-website/).
+     Empty content = not configured yet, and the visitor panel will say so
+     rather than showing a number it cannot verify. Set this to the deployed
+     API origin, e.g. content="https://azyron-api.onrender.com". -->
+<meta name="azyron:api" content="" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="AZYRON CLIENT — Performance. Smoothness. Style." />
 <meta property="og:description" content="Better FPS, smoother gameplay and optimized performance. Built for Minecraft, engineered for silence. Download the latest release." />
@@ -48,6 +53,7 @@
 }
 </script>
 <script type="module" src="./assets/js/app.js"></script>
+<script type="module" src="./assets/js/visitors.js"></script>
 </head>
 <body>
 <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
@@ -274,6 +280,38 @@
       <span class="live-total__k">TOTAL DOWNLOADS SINCE LAUNCH</span>
       <span class="live-total__v" id="liveTotal" aria-live="polite" aria-atomic="true">0</span>
       <span class="live-total__sub" id="liveTotalSub">JAR 0 &nbsp;+&nbsp; MRPACK 0</span>
+    </div>
+
+    <!-- visitors: uniques are lifetime, active is a 30s window. Two different
+         numbers, so they are never mixed into one figure. -->
+    <div class="visitors" id="visitors" data-state="connecting" data-reveal>
+      <span class="visitors__glow" aria-hidden="true"></span>
+
+      <div class="visitors__block visitors__block--unique">
+        <span class="visitors__k">TOTAL UNIQUE VISITORS</span>
+        <span class="visitors__v" id="visitorUnique" aria-live="polite" aria-atomic="true">—</span>
+        <span class="visitors__sub" id="visitorUniqueSub">one per player, counted once</span>
+      </div>
+
+      <div class="visitors__divider" aria-hidden="true"></div>
+
+      <div class="visitors__block visitors__block--active">
+        <span class="visitors__k">
+          <span class="live__dot live__dot--sm" id="visitorDot" aria-hidden="true"></span>
+          LIVE ACTIVE VISITORS
+        </span>
+        <span class="visitors__v" id="visitorActive" aria-live="polite" aria-atomic="true">—</span>
+        <span class="visitors__sub" id="visitorActiveSub">on the site right now</span>
+      </div>
+
+      <div class="visitors__foot">
+        <span class="visitors__status" id="visitorStatus" data-state="connecting">
+          <span class="visitors__status-dot" aria-hidden="true"></span>
+          <span id="visitorStatusText">CONNECTING</span>
+        </span>
+        <span class="visitors__note" id="visitorNote">active = seen in the last 30 seconds · updated every 1s</span>
+        <button class="visitors__retry" id="visitorRetry" type="button" hidden>RETRY</button>
+      </div>
     </div>
 
     <div class="live-grid" id="liveGrid" aria-busy="true">

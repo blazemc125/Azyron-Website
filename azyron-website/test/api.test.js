@@ -125,6 +125,8 @@ before(async () => {
   process.env.GH_API_BASE = upstreamUrl;
   process.env.CACHE_TTL_MS = '5000';
   process.env.ANALYTICS_FILE = join(tmp, 'downloads.log');
+  process.env.VISITORS_FILE = join(tmp, 'visitors.log');
+  process.env.ALLOWED_ORIGINS = 'https://blazemc125.github.io';
   process.env.FALLBACK_FILE = join(tmp, 'missing-snapshot.json');
 
   const mod = await import('../server.js?test=1');
@@ -243,4 +245,106 @@ test('serves the static site (docs/) and its 404 page', async () => {
   const missing = await fetch(`${baseUrl}/nope-not-a-page`);
   assert.equal(missing.status, 404);
   assert.match(await missing.text(), /404/);
+});
+
+/* ---------------------------------------------------------------- visitors */
+
+/**
+ * These are the endpoints that make "unique visitors" real: the number lives in
+ * the server's log, not in a browser, so every visitor sees the same total.
+ */
+
+const vid = (n) => String(n).padStart(4, '0').repeat(8); // 32 chars, valid shape
+
+async function heartbeat(visitorId, headers = {}) {
+  return fetch(`${baseUrl}/api/visits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ visitorId }),
+  });
+}
+
+test('a brand-new visitor raises the shared unique total to 1', async () => {
+  const res = await heartbeat(vid(1));
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.unique, 1);
+  assert.equal(body.active, 1);
+  assert.equal(body.isNew, true);
+  assert.equal(body.windowMs, 30_000);
+});
+
+test('refreshing 100 times keeps the unique total at 1', async () => {
+  for (let i = 0; i < 100; i += 1) await heartbeat(vid(1));
+  const totals = await (await fetch(`${baseUrl}/api/visits`)).json();
+  assert.equal(totals.unique, 1, 'repeat visits must never inflate uniques');
+  assert.equal(totals.active, 1);
+});
+
+test('ten tabs of the same visitor are counted once', async () => {
+  const results = await Promise.all(Array.from({ length: 10 }, () => heartbeat(vid(1))));
+  const bodies = await Promise.all(results.map((r) => r.json()));
+  assert.equal(bodies.filter((b) => b.isNew).length, 0, 'visitor #1 is already known');
+  const totals = await (await fetch(`${baseUrl}/api/visits`)).json();
+  assert.equal(totals.unique, 1);
+});
+
+test('a second visitor makes it 2, and both are active', async () => {
+  await heartbeat(vid(2));
+  const totals = await (await fetch(`${baseUrl}/api/visits`)).json();
+  assert.equal(totals.unique, 2);
+  assert.equal(totals.active, 2);
+});
+
+test('active is separate from unique and is lower when a visitor goes quiet', async () => {
+  // visitor 1 has not pinged for the whole test run; ask for totals "later"
+  const body = await (await fetch(`${baseUrl}/api/visits/health`)).json();
+  assert.equal(body.unique, 2);
+  assert.equal(body.activeWindowMs, 30_000);
+  assert.ok(body.unique >= body.active, 'active can never exceed unique');
+});
+
+test('junk visitor ids are rejected with 400 and do not change the total', async () => {
+  const before = await (await fetch(`${baseUrl}/api/visits`)).json();
+  for (const bad of ['', 'short', 'has spaces here and is long enough', 'x'.repeat(200), 42]) {
+    const res = await heartbeat(bad);
+    assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(bad)}`);
+    assert.equal((await res.json()).ok, false);
+  }
+  const noBody = await fetch(`${baseUrl}/api/visits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(noBody.status, 400);
+
+  const after = await (await fetch(`${baseUrl}/api/visits`)).json();
+  assert.equal(after.unique, before.unique, 'rejected ids must not be counted');
+});
+
+test('the API answers the GitHub Pages origin with CORS headers', async () => {
+  const res = await fetch(`${baseUrl}/api/visits`, {
+    method: 'OPTIONS',
+    headers: {
+      origin: 'https://blazemc125.github.io',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'content-type',
+    },
+  });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('access-control-allow-origin'), 'https://blazemc125.github.io');
+  assert.match(res.headers.get('access-control-allow-methods'), /POST/);
+  assert.match(res.headers.get('access-control-allow-headers'), /content-type/i);
+
+  const get = await fetch(`${baseUrl}/api/visits`, {
+    headers: { origin: 'https://blazemc125.github.io' },
+  });
+  assert.equal(get.headers.get('access-control-allow-origin'), 'https://blazemc125.github.io');
+  assert.match(get.headers.get('cache-control'), /no-store/);
+});
+
+test('an unknown origin gets no CORS grant (no wildcard)', async () => {
+  const res = await fetch(`${baseUrl}/api/visits`, { headers: { origin: 'https://evil.example' } });
+  assert.equal(res.headers.get('access-control-allow-origin'), null);
 });

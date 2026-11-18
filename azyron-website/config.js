@@ -37,6 +37,27 @@ export const config = {
   /** Download-analytics log (one JSON line per release-asset download). */
   analyticsFile: process.env.ANALYTICS_FILE || './data/downloads.log',
 
+  /** Unique/active visitor log (one JSON line per visitor heartbeat). */
+  visitorsFile: process.env.VISITORS_FILE || './data/visitors.log',
+
+  /**
+   * Salt for the IP+User-Agent fallback fingerprint. Raw IPs are never stored;
+   * only a salted hash. Set VISITOR_SALT in production so hashes are unique to
+   * this deployment.
+   */
+  visitorSalt: process.env.VISITOR_SALT || '',
+
+  /**
+   * Origins allowed to POST visitor pings with credentials-free CORS.
+   * The GitHub Pages site is a different origin from this API, so it must be
+   * listed explicitly rather than using '*'.
+   */
+  allowedOrigins: (process.env.ALLOWED_ORIGINS ||
+    'https://blazemc125.github.io,http://localhost:4100,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+
   /** Snapshot used to render a last-known-good state if GitHub is unreachable at boot. */
   fallbackFile: process.env.FALLBACK_FILE || './data/fallback-release.json',
 

@@ -199,6 +199,33 @@ if (!errors.length) ok('hidden attribute is enforced by CSS');
   if (!errors.length) ok(`section numbering 01..${String(numbers.length).padStart(2, '0')} in page order`);
 }
 
+/* --------------------------------- 7b. visitor counter is wired and honest */
+{
+  const index = read(join(SITE, 'index.html'));
+  const js = read(join(SITE, 'assets/js/visitors.js'));
+
+  for (const id of ['visitorUnique', 'visitorActive', 'visitorStatus', 'visitors']) {
+    if (!index.includes(`id="${id}"`)) fail(`docs/index.html: visitor panel is missing #${id}`);
+  }
+  if (!/TOTAL UNIQUE VISITORS/.test(index)) fail('docs/index.html: must label the unique total "TOTAL UNIQUE VISITORS"');
+  if (!/LIVE ACTIVE VISITORS/.test(index)) fail('docs/index.html: must label live activity separately as "LIVE ACTIVE VISITORS"');
+  if (!/assets\/js\/visitors\.js/.test(index)) fail('docs/index.html: the visitor client is not loaded');
+
+  // Never hardcode a visitor number in the markup or invent one in the script.
+  if (/id="visitorUnique"[^>]*>\s*\d/.test(index)) fail('docs/index.html: the unique total must not be hardcoded');
+  if (/id="visitorActive"[^>]*>\s*\d/.test(index)) fail('docs/index.html: the active total must not be hardcoded');
+  if (/Math\.random\(\)\s*\*\s*\d/.test(js)) fail('docs/assets/js/visitors.js: visitor totals must never be simulated');
+  if (/Math\.random\(\).*unique/i.test(js)) fail('docs/assets/js/visitors.js: visitor totals must never be simulated');
+
+  // The API origin must not be invented: an empty meta is valid (and shows the
+  // "not deployed" state), a guessed hostname is not.
+  const meta = index.match(/<meta name="azyron:api" content="([^"]*)"/);
+  if (!meta) fail('docs/index.html: missing <meta name="azyron:api"> so the API origin is configurable');
+  else if (meta[1] && !/^https:\/\/[a-z0-9.-]+$/i.test(meta[1])) fail('docs/index.html: azyron:api must be empty or a bare https origin');
+
+  if (!errors.length) ok('visitor panel present, labelled, configurable and never hardcoded');
+}
+
 /* --------------------------------------------------- 8. size budget (warning) */
 const totalKb = listFiles(SITE)
   .filter((f) => !f.endsWith('.woff2'))

@@ -18,3 +18,5 @@ app_pojavlauncher/.cxx/
 node_modules/
 azyron-website/node_modules/
 azyron-website/data/downloads.log
+azyron-website/data/visitors.log
+azyron-website/data/visitors.log.tmp

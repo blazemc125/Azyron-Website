@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { config, releaseHtmlUrl, repoHtmlUrl } from './config.js';
 import { getRelease, getReleaseHistory, findAsset, cacheStats, humanFileSize } from './lib/github.js';
 import { recordDownload, downloadTotals } from './lib/downloads.js';
+import { recordVisit, visitorTotals, isValidVisitorId, ACTIVE_WINDOW_MS, compactLog } from './lib/visitors.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // The static site lives in ../../docs so the exact same files can be published
@@ -239,6 +240,85 @@ export function createApp() {
   // ---------------------------------------------------------------------------
   // Static site
   // ---------------------------------------------------------------------------
+  /**
+   * ---------------------------------------------------------------------------
+   * Visitor tracking
+   * ---------------------------------------------------------------------------
+   * These are the only endpoints that accept a write, and they are the reason
+   * the visitor counters are real: a unique visitor is a row in a database, not
+   * a number in someone's browser.
+   */
+
+  /** CORS for the GitHub Pages origin (the site is a different origin). */
+  app.use('/api/visits', (req, res, next) => {
+    const origin = req.get('origin');
+    if (origin && config.allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
+  /** Shared totals. Polled by every visitor once a second. */
+  app.get('/api/visits', (req, res) => {
+    const totals = visitorTotals();
+    res.json({
+      ok: true,
+      fetchedAt: new Date().toISOString(),
+      unique: totals.unique,
+      active: totals.active,
+      windowMs: totals.windowMs,
+    });
+  });
+
+  /**
+   * Heartbeat. Called once when the page opens and every 10s while it is open.
+   * Idempotent for uniques — the same visitor id can call this forever and the
+   * unique total will not move after the first time.
+   */
+  app.post('/api/visits', express.json({ limit: '2kb' }), (req, res) => {
+    const body = req.body || {};
+    const visitorId = body.visitorId;
+
+    if (!isValidVisitorId(visitorId)) {
+      res.status(400).json({ ok: false, error: 'visitorId must be a 16–128 character opaque token' });
+      return;
+    }
+
+    const result = recordVisit({
+      visitorId,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+      // The client sets this only when it just minted an id because its
+      // storage was empty, which is the one case where the IP+UA fallback
+      // should be consulted.
+      fresh: body.fresh === true,
+    });
+
+    res.status(201).json({ ok: true, fetchedAt: new Date().toISOString(), ...result });
+  });
+
+  /** Honest capability probe: tells the browser whether a writable store exists. */
+  app.get('/api/visits/health', (req, res) => {
+    const totals = visitorTotals();
+    res.json({
+      ok: true,
+      store: 'append-only-jsonl',
+      unique: totals.unique,
+      active: totals.active,
+      activeWindowMs: ACTIVE_WINDOW_MS,
+      persisted: true,
+    });
+  });
+
   app.get('/api/*', (req, res) => res.status(404).json({ ok: false, error: 'Unknown API route' }));
 
   app.use(
@@ -264,6 +344,19 @@ if (isEntryPoint) {
   createApp().listen(config.port, config.host, () => {
     console.log(`AZYRON CLIENT website listening on http://${config.host}:${config.port}`);
     console.log(`Release source: ${config.github.owner}/${config.github.repo}@${config.github.tag} (server cache ${config.cacheTtlMs}ms)`);
+    console.log(`Visitor store: ${config.visitorsFile}`);
+
+    // Fold the heartbeat log down to one row per visitor periodically. The log
+    // is append-only so a crash cannot corrupt history, which means it needs
+    // this to stay bounded.
+    setInterval(() => {
+      try {
+        const rows = compactLog();
+        console.log(`[visitors] compacted log to ${rows} visitor rows`);
+      } catch (err) {
+        console.warn('[visitors] compaction skipped:', err.message);
+      }
+    }, 15 * 60 * 1000).unref();
   });
 }
 

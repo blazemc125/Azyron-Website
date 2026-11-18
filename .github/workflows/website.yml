@@ -101,6 +101,16 @@ jobs:
         shell: bash
         run: node --test scripts/test-event-store.mjs
 
+      # jsdom drives the real visitor client against the real Express app: one
+      # heartbeat per browser, uniques that never inflate, 1s refresh, and an
+      # honest "unavailable" state when no backend answers.
+      - name: Test the unique visitor counter (browser client + API)
+        if: steps.filter.outputs.changed == 'true'
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund jsdom
+          node --test scripts/test-visitors.mjs
+
       - name: Run site integration tests
         if: steps.filter.outputs.changed == 'true'
         working-directory: azyron-website
