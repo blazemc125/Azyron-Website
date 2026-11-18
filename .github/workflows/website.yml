@@ -104,10 +104,14 @@ jobs:
       # jsdom drives the real visitor client against the real Express app: one
       # heartbeat per browser, uniques that never inflate, 1s refresh, and an
       # honest "unavailable" state when no backend answers.
+      #
+      # The harness imports azyron-website/server.js, so that app's deps must
+      # exist first — hence the npm ci here rather than relying on a later step.
       - name: Test the unique visitor counter (browser client + API)
         if: steps.filter.outputs.changed == 'true'
         shell: bash
         run: |
+          npm ci --no-audit --no-fund --prefix azyron-website
           npm install --no-save --no-audit --no-fund jsdom
           node --test scripts/test-visitors.mjs
 
