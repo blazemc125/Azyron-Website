@@ -249,8 +249,8 @@
       <h2 class="section__title" id="liveTitle" data-reveal>Downloaded in <span class="text-gradient">real time</span></h2>
       <p class="section__lede" data-reveal>
         Counts are read straight from the official AZYRON CLIENT release on GitHub, so every visitor
-        sees the same numbers. Tracking restarted at zero when this counter was reset &mdash; every
-        figure on this page counts from that moment, and nothing is estimated, simulated or padded.
+        sees the same numbers. Tracking started at zero when this counter launched &mdash; nothing here
+        is estimated, simulated or padded.
       </p>
 
       <div class="live__meta">
@@ -268,7 +268,7 @@
 
     <!-- combined total -->
     <div class="live-total" data-reveal>
-      <span class="live-total__k">TOTAL DOWNLOADS</span>
+      <span class="live-total__k">TOTAL DOWNLOADS SINCE LAUNCH</span>
       <span class="live-total__v" id="liveTotal" aria-live="polite" aria-atomic="true">0</span>
       <span class="live-total__sub" id="liveTotalSub">JAR 0 &nbsp;+&nbsp; MRPACK 0</span>
     </div>
@@ -292,9 +292,13 @@
         </header>
 
         <div class="dl-card__counts">
-          <div class="dl-count dl-count--accent">
-            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> TOTAL DOWNLOADS</span>
+          <div class="dl-count">
+            <span class="dl-count__k">TOTAL DOWNLOADS</span>
             <span class="dl-count__v" id="liveJarTotal">0</span>
+          </div>
+          <div class="dl-count dl-count--accent">
+            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> SINCE LAUNCH</span>
+            <span class="dl-count__v" id="liveJarLive">0</span>
           </div>
         </div>
 
@@ -329,9 +333,13 @@
         </header>
 
         <div class="dl-card__counts">
-          <div class="dl-count dl-count--accent">
-            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> TOTAL DOWNLOADS</span>
+          <div class="dl-count">
+            <span class="dl-count__k">TOTAL DOWNLOADS</span>
             <span class="dl-count__v" id="liveMrpackTotal">0</span>
+          </div>
+          <div class="dl-count dl-count--accent">
+            <span class="dl-count__k"><span class="live__dot live__dot--sm" aria-hidden="true"></span> SINCE LAUNCH</span>
+            <span class="dl-count__v" id="liveMrpackLive">0</span>
           </div>
         </div>
 
@@ -716,7 +724,7 @@
       </details>
       <details class="faq__item" data-reveal>
         <summary><span>How are the download numbers counted?</span><span class="faq__sign" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Every figure on this site is a <strong>total counted since the counter was reset</strong>, and it starts at 0. The number is computed as GitHub's own release counters minus a snapshot taken at the moment of the reset — so every increment is a real download of a real file, tracked separately for the <code>.jar</code> and the <code>.mrpack</code>. GitHub's lifetime totals are not shown here; the reset point is this site's own starting line. When GitHub cannot be reached we keep the last confirmed value and label it clearly — we never invent a number.</p></div>
+        <div class="faq__body"><p>The headline figure is <strong>Downloads Since Launch</strong>: it starts at 0 and counts only the downloads that happened after the counter went live. It is computed from GitHub's own release counters, minus a snapshot taken at launch — so every increment is a real download of a real file, tracked separately for the <code>.jar</code> and the <code>.mrpack</code>. The per-file "all-time" figure next to it is GitHub's lifetime total for that file. When GitHub cannot be reached we show the last confirmed value and label it clearly — we never invent a number.</p></div>
       </details>
       <details class="faq__item" data-reveal>
         <summary><span>The download didn't start. What now?</span><span class="faq__sign" aria-hidden="true"></span></summary>
