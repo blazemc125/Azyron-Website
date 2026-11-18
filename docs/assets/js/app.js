@@ -532,15 +532,8 @@ function renderAssets(release) {
   release.assets.forEach((asset) => {
     const card = grid.querySelector(`.asset[data-asset-id="${asset.id}"]`);
     if (!card) return;
-    const dl = card.querySelector('[data-field="downloads"]');
-    if (dl && dl.textContent !== formatNumber(asset.downloads)) {
-      dl.textContent = formatNumber(asset.downloads);
-      dl.classList.remove('pop');
-      void dl.offsetWidth;
-      dl.classList.add('pop');
-    }
-    // left to repaintCounters(): it adds any unconfirmed local click on top of
-    // the confirmed per-asset figure, so this cell never flickers down.
+    // Per-asset figures are left to repaintCounters(): it adds any unconfirmed
+    // local click on top of the confirmed figure, so a cell never flickers down.
   });
 }
 
@@ -563,11 +556,7 @@ function assetCardHtml(asset) {
         <span class="asset__meta-v">${escapeHtml(asset.sizeLabel || formatBytes(asset.size))}</span>
       </div>
       <div class="asset__meta-item">
-        <span class="asset__meta-k">ALL-TIME (GITHUB)</span>
-        <span class="asset__meta-v" data-field="downloads">${formatNumber(asset.downloads)}</span>
-      </div>
-      <div class="asset__meta-item">
-        <span class="asset__meta-k">SINCE LAUNCH</span>
+        <span class="asset__meta-k">TOTAL DOWNLOADS</span>
         <span class="asset__meta-v" data-field="since" data-kind="${escapeHtml(asset.kind)}">${formatNumber(sinceValue)}</span>
       </div>
     </div>
@@ -1045,16 +1034,15 @@ function renderLiveStats(model) {
   setText($('#liveJarFile'), model.jar.name);
   setText($('#liveJarSize'), model.jar.asset ? `${model.jar.sizeLabel} · ${model.versionLabel}` : '—');
   setText($('#liveJarBtnMeta'), model.versionLabel);
-  animateCount($('#liveJarTotal'), model.jar.total);
-  animateCount($('#liveJarLive'), model.jar.live);
+  // One figure per card: downloads counted by this site since the reset.
+  animateCount($('#liveJarTotal'), model.jar.live);
   setBar($('#liveJarBar'), model.jar.share);
 
   // MRPACK card
   setText($('#liveMrpackFile'), model.mrpack.name);
   setText($('#liveMrpackSize'), model.mrpack.asset ? `${model.mrpack.sizeLabel} · ${model.versionLabel}` : '—');
   setText($('#liveMrpackBtnMeta'), model.versionLabel);
-  animateCount($('#liveMrpackTotal'), model.mrpack.total);
-  animateCount($('#liveMrpackLive'), model.mrpack.live);
+  animateCount($('#liveMrpackTotal'), model.mrpack.live);
   setBar($('#liveMrpackBar'), model.mrpack.share);
 
   // download buttons — enabled only when the asset really exists

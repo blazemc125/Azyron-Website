@@ -127,8 +127,11 @@ sinceLaunch = live GitHub download_count − baseline captured at launch
 - The UI re-checks GitHub **every second**. Clicking DOWNLOAD files a small *claim*
   (see below) so the number rises once and never falls back while GitHub catches up.
   The claim is per-browser and never reaches other visitors.
-- Per-asset cards show **SINCE LAUNCH** and **ALL-TIME (GITHUB)** side by side, so
-  GitHub's lifetime figure is still visible without being presented as the counter.
+- Every figure shown on the site is a total counted **since the reset** — the
+  headline, the two live cards, the combined total, the stats bar and the per-file
+  cards. GitHub's lifetime totals are deliberately not displayed, so nothing on the
+  page contradicts the reset; they remain on the GitHub release page if anyone
+  wants them.
 
 Why not increment a counter on click? GitHub Pages runs no server, and there is no
 write-only token that can be safely handed to a browser — any click-counter would be

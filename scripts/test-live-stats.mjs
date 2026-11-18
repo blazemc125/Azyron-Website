@@ -166,7 +166,7 @@ const sinceLaunch = {
   ],
 };
 
-test('buildLiveModel keeps JAR and MRPACK separate and shows both totals', () => {
+test('buildLiveModel keeps JAR and MRPACK separate', () => {
   const now = new Date('2026-11-17T15:00:00.500Z').getTime();
   const model = buildLiveModel(release, sinceLaunch, now);
 
@@ -187,6 +187,12 @@ test('buildLiveModel keeps JAR and MRPACK separate and shows both totals', () =>
   assert.equal(model.jar.share, 100);
   assert.equal(model.mrpack.share, 0);
   assert.equal(model.versionLabel, 'v1.0.0');
+
+  // GitHub's lifetime totals are still in the model (they identify the asset and
+  // stay available for anyone who wants them) — but they are NOT what the site
+  // renders. `.live` is the figure that appears on every card.
+  assert.notEqual(model.jar.total, model.jar.live);
+  assert.equal(model.jar.total, 12);
 });
 
 test('an empty since-launch total never divides by zero', () => {
@@ -247,4 +253,31 @@ test('the section contains no fabricated numbers', async () => {
   // Every figure must be derived from GitHub's counters minus the baseline.
   assert.match(source, /sinceLaunch\?\.perAsset/);
   assert.match(source, /asset\.downloads|jar\?\.downloads/);
+});
+
+/* --------------------------------- the reset the site presents to visitors */
+
+test('every download figure the site renders starts from zero', async () => {
+  // After a reset the page must not show GitHub's lifetime totals anywhere: the
+  // headline, both live cards, the combined total and the per-file cards all
+  // read 0 and count up only as new downloads arrive.
+  const { readFile } = await import('node:fs/promises');
+  const root = new URL('../docs/', import.meta.url);
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  const app = await readFile(new URL('assets/js/app.js', root), 'utf8');
+
+  // the live cards expose exactly one figure each, and it is the site's total
+  assert.match(html, /id="liveJarTotal"/);
+  assert.match(html, /id="liveMrpackTotal"/);
+  assert.doesNotMatch(html, /liveJarLive|liveMrpackLive/, 'the duplicate since-launch figure is gone');
+
+  // that figure is fed from the since-launch value, never from GitHub's raw count
+  assert.match(app, /animateCount\(\$\('#liveJarTotal'\), model\.jar\.live\)/);
+  assert.match(app, /animateCount\(\$\('#liveMrpackTotal'\), model\.mrpack\.live\)/);
+  assert.doesNotMatch(app, /model\.jar\.total\)/, 'the GitHub lifetime figure must not be rendered');
+  assert.doesNotMatch(app, /model\.mrpack\.total\)/);
+
+  // and the per-file cards no longer print a lifetime number
+  assert.doesNotMatch(app, /ALL-TIME/, 'no lifetime labels on the asset cards');
+  assert.match(app, /data-field="since"[^>]*>\$\{formatNumber\(sinceValue\)\}/);
 });
