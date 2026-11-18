@@ -274,5 +274,7 @@ test('with no backend configured the panel says so instead of guessing a host', 
   assert.match(doc.getElementById('visitorStatusText').textContent, /UNAVAILABLE/);
   assert.match(doc.getElementById('visitorNote').textContent, /not deployed/);
   assert.equal(doc.getElementById('visitorUnique').textContent, '—');
+  // Retry would only re-fail when nothing is configured, so it is hidden.
+  assert.equal(doc.getElementById('visitorRetry').hidden, true);
   close(dom);
 });

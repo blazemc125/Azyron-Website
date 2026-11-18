@@ -194,12 +194,14 @@ function paintNumber(el, key, value, { bump = true } = {}) {
   state.painted[key] = value;
 }
 
-function setStatus(mode, text, note) {
+function setStatus(mode, text, note, { retry = true } = {}) {
   els.root.dataset.state = mode;
   if (els.status) els.status.dataset.state = mode;
   if (els.statusText && text) els.statusText.textContent = text;
   if (els.note && note) els.note.textContent = note;
-  if (els.retry) els.retry.hidden = !(mode === 'offline' || mode === 'unavailable');
+  // Only offer RETRY when retrying could plausibly help. With no backend
+  // configured at all, a button that re-fails is just noise.
+  if (els.retry) els.retry.hidden = !(retry && (mode === 'offline' || mode === 'unavailable'));
 }
 
 const LIVE_NOTE = 'active = seen in the last 30 seconds · updated every 1s';
@@ -403,7 +405,7 @@ if (!els.root) {
 } else if (VISITS_URL === null) {
   // Honest dead end: no backend has been configured for this deployment, so
   // there is no shared total to read. Say that; do not invent a figure.
-  setStatus('unavailable', 'UNAVAILABLE', 'visitor tracking backend not deployed');
+  setStatus('unavailable', 'UNAVAILABLE', 'visitor tracking backend not deployed', { retry: false });
   if (els.uniqueSub) els.uniqueSub.textContent = 'needs the visitor service (see azyron-website/render.yaml)';
   if (els.activeSub) els.activeSub.textContent = 'live activity needs the visitor service';
 } else {
